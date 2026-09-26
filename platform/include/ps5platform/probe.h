@@ -22,8 +22,9 @@ typedef void (*ps5_probe_log_fn)(void *context, const char *line);
 #define PS5_PROBE_LARGE 0x1u
 /* The shared-memory JIT interface, which may not be granted to a title. */
 #define PS5_PROBE_JIT_API 0x2u
-/* The huge test: 10 GiB mapped and every byte of it written and read back at
- * once, as one allocation and as ten 1 GiB allocations in one reserved range. */
+/* The huge test: where the kernel grants large virtual ranges, then 10 GiB
+ * mapped and every word of it written and read back at once, as one
+ * allocation and as ten 1 GiB allocations. */
 #define PS5_PROBE_HUGE 0x4u
 
 /* Runs every test and returns how many checks failed. */
