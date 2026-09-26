@@ -550,6 +550,107 @@ test_probe_threads(void)
    check(seen.passes == 2, "threads: both threads report their stacks");
 }
 
+
+/* The POSIX gaps (src/posix.c) and regular expressions (src/regex.c). */
+static int
+compare_offset(void *thunk, const void *a, const void *b)
+{
+   const int offset = *(const int *)thunk;
+   return (*(const int *)a + offset) % 10 - (*(const int *)b + offset) % 10;
+}
+
+static int
+compare_nested(void *thunk, const void *a, const void *b)
+{
+   /* A comparator that sorts again must get its own thunk back. */
+   int inner[3] = {3, 1, 2};
+   int zero = 0;
+   ps5_qsort_r(inner, 3, sizeof(int), &zero, compare_offset);
+   (*(int *)thunk)++;
+   return *(const int *)a - *(const int *)b;
+}
+
+static void
+test_posix(void)
+{
+   int values[6] = {5, 3, 9, 1, 7, 2};
+   int offset = 0;
+   ps5_qsort_r(values, 6, sizeof(int), &offset, compare_offset);
+   check(values[0] == 1 && values[1] == 2 && values[5] == 9, "qsort_r sorts with its thunk");
+   int calls = 0;
+   int nested[4] = {4, 2, 3, 1};
+   ps5_qsort_r(nested, 4, sizeof(int), &calls, compare_nested);
+   check(nested[0] == 1 && nested[3] == 4 && calls > 0, "qsort_r nests");
+
+   char path[] = "/tmp/ps5platform-XXXXXX.log";
+   const int fd = ps5_mkstemps(path, 4);
+   check(fd >= 0 && strstr(path, "XXXXXX") == NULL && strcmp(path + strlen(path) - 4, ".log") == 0,
+         "mkstemps names a new file and keeps the suffix");
+   struct stat status;
+   check(fd >= 0 && fstat(fd, &status) == 0, "mkstemps's file exists");
+   if (fd >= 0) {
+      close(fd);
+      unlink(path);
+   }
+   char short_template[] = "XXXXX";
+   check(ps5_mkstemps(short_template, 0) == -1 && errno == EINVAL, "mkstemps refuses a short template");
+
+   errno = 0;
+   check(ps5_popen("true", "r") == NULL && errno == ENOSYS, "popen fails with ENOSYS");
+   char *buffer = NULL;
+   size_t size = 0;
+   check(ps5_open_memstream(&buffer, &size) == NULL && errno == ENOSYS, "open_memstream fails with ENOSYS");
+
+   char names[5][32];
+   memset(names, 'x', sizeof(names));
+   check(ps5___xuname(32, names) == 0 && strcmp(names[0], "PlayStation") == 0 && strlen(names[3]) < 32,
+         "uname fills every field and terminates it");
+
+   char memory[8];
+   check(ps5___memset_chk(memory, 7, sizeof(memory), sizeof(memory)) == memory && memory[7] == 7,
+         "__memset_chk sets a fitting range");
+
+   struct ps5_regex re;
+   memset(&re, 0, sizeof(re));
+   check(ps5_regcomp(&re, "^deqp-v[kK]$", PS5_REG_EXTENDED | PS5_REG_NOSUB) == 0, "regcomp: an ERE");
+   check(ps5_regexec(&re, "deqp-vk", 0, NULL, 0) == 0, "regexec: a match");
+   check(ps5_regexec(&re, "deqp-vks", 0, NULL, 0) == PS5_REG_NOMATCH, "regexec: no match");
+   ps5_regfree(&re);
+
+   memset(&re, 0, sizeof(re));
+   struct ps5_regmatch match[3];
+   check(ps5_regcomp(&re, "(a+)(b)c", PS5_REG_EXTENDED) == 0 && re.re_nsub == 2, "regcomp: two groups");
+   check(ps5_regexec(&re, "xxaabc", 3, match, 0) == 0 && match[0].rm_so == 2 && match[0].rm_eo == 6 &&
+            match[1].rm_so == 2 && match[1].rm_eo == 4 && match[2].rm_so == 4,
+         "regexec: the groups' offsets");
+   match[0].rm_so = 1;
+   match[0].rm_eo = 5;
+   check(ps5_regexec(&re, "aaabcz", 3, match, PS5_REG_STARTEND) == 0 && match[0].rm_so == 1 &&
+            match[0].rm_eo == 5,
+         "regexec: REG_STARTEND offsets stay relative to the string");
+   ps5_regfree(&re);
+
+   memset(&re, 0, sizeof(re));
+   check(ps5_regcomp(&re, "hello", PS5_REG_ICASE | PS5_REG_NOSUB) == 0 &&
+            ps5_regexec(&re, "Say HELLO", 0, NULL, 0) == 0,
+         "regcomp: REG_ICASE, a basic expression");
+   ps5_regfree(&re);
+   memset(&re, 0, sizeof(re));
+   check(ps5_regcomp(&re, "a.c", PS5_REG_NOSPEC | PS5_REG_NOSUB) == 0 &&
+            ps5_regexec(&re, "abc", 0, NULL, 0) == PS5_REG_NOMATCH &&
+            ps5_regexec(&re, "a.c", 0, NULL, 0) == 0,
+         "regcomp: REG_NOSPEC is literal");
+   ps5_regfree(&re);
+
+   memset(&re, 0, sizeof(re));
+   const int bad = ps5_regcomp(&re, "(unclosed", PS5_REG_EXTENDED);
+   char message[64];
+   check(bad == PS5_REG_EPAREN && ps5_regerror(bad, &re, message, sizeof(message)) > 1 &&
+            strcmp(message, "Missing ')'") == 0,
+         "regcomp: an unclosed group, and its message");
+   ps5_regfree(&re);
+}
+
 int
 main(void)
 {
@@ -588,6 +689,9 @@ main(void)
    printf("%s\n", "test_shm");
    fflush(stdout);
    test_shm();
+   printf("%s\n", "test_posix");
+   fflush(stdout);
+   test_posix();
    printf("%s\n", "test_libc");
    fflush(stdout);
    test_libc();

@@ -20,6 +20,14 @@
  *                          goes through getdents
  *   getaddrinfo, freeaddrinfo
  *                          routed by the SDK to a module titles do not load
+ *   qsort_r, mkstemps, openlog, uname (__xuname), regcomp, regexec,
+ *   regfree, regerror, __assert, __memset_chk
+ *                          no system module exports them (the SDK's own
+ *                          FreeBSD headers call the last two)
+ *   popen, pclose, open_memstream
+ *                          no system module exports them, nor fork, funopen
+ *                          or fopencookie to build them on: they fail as
+ *                          POSIX lets them
  *
  * They carry a ps5_ prefix: a title that defined libc's own names would
  * export them, which the title converter refuses. Each consumer binds the
@@ -34,6 +42,7 @@
 #include <dirent.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -92,6 +101,78 @@ int ps5_fchmodat(int directory, const char *name, mode_t mode, int flags);
 int ps5_fstatat(int directory, const char *name, struct stat *status, int flags);
 int ps5_mkdirat(int directory, const char *name, mode_t mode);
 int ps5_renameat(int from_directory, const char *from, int to_directory, const char *to);
+
+/* qsort_r in the FreeBSD form the SDK's stdlib.h declares (the thunk before
+ * the comparator, and passed to it first), over the exported qsort. */
+void ps5_qsort_r(void *base, size_t count, size_t size, void *thunk,
+                 int (*compare)(void *thunk, const void *a, const void *b));
+
+/* Replaces the six X's before a suffix of suffix_length characters; the file
+ * is created 0666, since a title's files stay reachable over FTP. */
+int ps5_mkstemps(char *path_template, int suffix_length);
+
+/* The exported syslog takes no identity: opening the log changes nothing. */
+void ps5_openlog(const char *ident, int option, int facility);
+
+/* A title starts no processes and has no memory-backed stdio stream: these
+ * fail, with ENOSYS. */
+FILE *ps5_popen(const char *command, const char *mode);
+int ps5_pclose(FILE *stream);
+FILE *ps5_open_memstream(char **buffer, size_t *size);
+
+/* uname through sysctl; __xuname is what the SDK's utsname.h calls. */
+int ps5___xuname(int length, void *names);
+
+/* What the SDK's assert.h and fortified string.h call. */
+void ps5___assert(const char *function, const char *file, int line, const char *expression)
+   __attribute__((__noreturn__));
+void *ps5___memset_chk(void *destination, int value, size_t length, size_t destination_length);
+
+/* POSIX regular expressions in the SDK's FreeBSD <regex.h> form: these structs
+ * are laid out as its regex_t and regmatch_t, and the flag and error values are
+ * its own. The engine is musl's (src/regex/). */
+struct ps5_regex {
+   int re_magic;
+   size_t re_nsub;
+   const char *re_endp;
+   void *re_g;
+};
+struct ps5_regmatch {
+   int64_t rm_so;
+   int64_t rm_eo;
+};
+#define PS5_REG_EXTENDED 0001
+#define PS5_REG_ICASE 0002
+#define PS5_REG_NOSUB 0004
+#define PS5_REG_NEWLINE 0010
+#define PS5_REG_NOSPEC 0020
+#define PS5_REG_PEND 0040
+#define PS5_REG_NOTBOL 00001
+#define PS5_REG_NOTEOL 00002
+#define PS5_REG_STARTEND 00004
+#define PS5_REG_NOMATCH 1
+#define PS5_REG_BADPAT 2
+#define PS5_REG_ECOLLATE 3
+#define PS5_REG_ECTYPE 4
+#define PS5_REG_EESCAPE 5
+#define PS5_REG_ESUBREG 6
+#define PS5_REG_EBRACK 7
+#define PS5_REG_EPAREN 8
+#define PS5_REG_EBRACE 9
+#define PS5_REG_BADBR 10
+#define PS5_REG_ERANGE 11
+#define PS5_REG_ESPACE 12
+#define PS5_REG_BADRPT 13
+#define PS5_REG_EMPTY 14
+#define PS5_REG_ASSERT 15
+#define PS5_REG_INVARG 16
+#define PS5_REG_ILLSEQ 17
+#define PS5_REG_ITOA 0400
+int ps5_regcomp(struct ps5_regex *preg, const char *pattern, int cflags);
+int ps5_regexec(const struct ps5_regex *preg, const char *string, size_t nmatch,
+                struct ps5_regmatch *pmatch, int eflags);
+void ps5_regfree(struct ps5_regex *preg);
+size_t ps5_regerror(int code, const struct ps5_regex *preg, char *buffer, size_t size);
 
 /* For the host tests: the path of name relative to a directory's path. */
 int ps5_join_path(const char *directory, const char *name, char *out, size_t size);

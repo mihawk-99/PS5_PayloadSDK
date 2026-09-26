@@ -30,5 +30,8 @@ compiler is not byte-identical, and the fork changes none of them.
 
 - `include/ps5platform/`: the headers.
 - `src/`: the library, including the capability probe (`src/probe.c`).
+  `src/regex/` is musl 1.2.5's regular-expression engine (TRE), under the MIT
+  licence in `src/regex/COPYRIGHT.musl`; `src/regex.c` adapts it to the SDK's
+  FreeBSD `<regex.h>`.
 - `tests/`: the host unit tests and the host model of the console's kernel.
 - `docs/PROBE.md`: what the console measured, with `evidence/`.

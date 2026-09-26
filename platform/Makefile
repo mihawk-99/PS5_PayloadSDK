@@ -33,9 +33,17 @@ SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:src/%.c=build/ps5/%.o)
 HEADERS := $(wildcard include/ps5platform/*.h src/*.h) ../include/freebsd/sys/_ucontext.h
 
+# musl's regex engine (src/regex/, MIT), built as imported: its own warnings
+# are not this tree's to fix.
+REGEX_SRCS := $(wildcard src/regex/*.c)
+REGEX_OBJS := $(REGEX_SRCS:src/regex/%.c=build/ps5/regex/%.o)
+REGEX_HEADERS := $(wildcard src/regex/*.h)
+REGEX_CFLAGS := $(filter-out -Wall -Wextra -Werror,$(CFLAGS)) -w
+
 HOST_CC ?= cc
 HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -Iinclude -Isrc -pthread
 HOST_SRCS := $(filter-out src/probe.c,$(SRCS)) tests/host_kernel.c tests/test_platform.c
+HOST_REGEX_OBJS := $(REGEX_SRCS:src/regex/%.c=build/host/regex/%.o)
 
 .PHONY: all clean install test
 
@@ -45,13 +53,21 @@ build/ps5/%.o: src/%.c $(HEADERS)
 	@mkdir -p build/ps5
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/ps5/libps5platform.a: $(OBJS)
+build/ps5/regex/%.o: src/regex/%.c $(REGEX_HEADERS)
+	@mkdir -p build/ps5/regex
+	$(CC) $(REGEX_CFLAGS) -c $< -o $@
+
+build/ps5/libps5platform.a: $(OBJS) $(REGEX_OBJS)
 	rm -f $@
 	$(AR) -rsc $@ $^
 
-build/host/test_platform: $(HOST_SRCS) $(HEADERS) $(wildcard tests/*.h)
+build/host/regex/%.o: src/regex/%.c $(REGEX_HEADERS)
+	@mkdir -p build/host/regex
+	$(HOST_CC) -std=gnu11 -O1 -g -w -c $< -o $@
+
+build/host/test_platform: $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HEADERS) $(wildcard tests/*.h)
 	@mkdir -p build/host
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) -o $@
+	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) -o $@
 
 build/host/test_directory_records: src/directory.c tests/test_directory_records.c $(HEADERS)
 	@mkdir -p build/host

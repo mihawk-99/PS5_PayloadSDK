@@ -341,3 +341,20 @@ getdents(int fd, char *buffer, int bytes)
    }
    return used_bytes;
 }
+
+/* libkernel's sysctl. What the console answers for the names uname reads has
+ * not been measured, so the model answers none of them, and the tests see
+ * uname's fallbacks. */
+int
+sysctl(const int *name, unsigned int length, void *old_value, size_t *old_length,
+       const void *new_value, size_t new_length)
+{
+   (void)name;
+   (void)length;
+   (void)old_value;
+   (void)old_length;
+   (void)new_value;
+   (void)new_length;
+   errno = ENOENT;
+   return -1;
+}
