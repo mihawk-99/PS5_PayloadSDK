@@ -81,7 +81,8 @@ build/host/dlmalloc/mspace.o: src/dlmalloc/mspace.c $(HEAP_HEADERS)
 
 build/host/test_platform: $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HOST_HEAP_OBJ) $(HEADERS) $(wildcard tests/*.h)
 	@mkdir -p build/host
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HOST_HEAP_OBJ) -Wl,--wrap=pthread_create -o $@
+	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HOST_HEAP_OBJ) -Wl,--wrap=pthread_create \
+		-Wl,--wrap=pthread_join -Wl,--wrap=pthread_detach -o $@
 
 build/host/test_directory_records: src/directory.c tests/test_directory_records.c $(HEADERS)
 	@mkdir -p build/host

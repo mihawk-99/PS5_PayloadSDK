@@ -195,6 +195,10 @@ int ps5_dladdr(const void *address, void *info);
  * every such thread, its libraries' included (src/threads.c). */
 #define PS5_THREAD_STACK_BYTES ((size_t)2 << 20)
 
+/* Thread stacks in direct memory (src/threads.c): those of threads not yet
+ * ended and joined, and freed ones kept for the next threads. */
+void ps5_thread_stacks(unsigned *live, unsigned *cached);
+
 /* What the SDK's assert.h and fortified string.h call. */
 void ps5___assert(const char *function, const char *file, int line, const char *expression)
    __attribute__((__noreturn__));

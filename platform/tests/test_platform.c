@@ -72,8 +72,10 @@ nothing_live(void)
    ps5_exec_live(&regions, &bytes);
    struct ps5_shm_stats stats;
    ps5_shm_live(&stats);
+   unsigned stacks = 0, cached = 0;
+   ps5_thread_stacks(&stacks, &cached);
    return regions == 0 && bytes == 0 && stats.objects == 0 && stats.views == 0 &&
-          stats.ranges == 0 && host_direct_allocations() == 0;
+          stats.ranges == 0 && host_direct_allocations() == (long long)(stacks + cached);
 }
 
 /* ---- executable regions ----------------------------------------------------- */
@@ -616,6 +618,22 @@ test_thread_destructors(void)
 }
 
 /* src/threads.c, linked with --wrap=pthread_create as consumers link it. */
+static int deep_done, deep_release;
+
+/* Uses 1.5 MiB of its stack, waits until released, then counts itself. */
+static void *
+deep_stack(void *unused)
+{
+   (void)unused;
+   volatile unsigned char frame[1536 * 1024];
+   for (size_t i = 0; i < sizeof(frame); i += 4096)
+      frame[i] = (unsigned char)i;
+   while (!__atomic_load_n(&deep_release, __ATOMIC_ACQUIRE))
+      usleep(1000);
+   __atomic_fetch_add(&deep_done, 1, __ATOMIC_ACQ_REL);
+   return (void *)(uintptr_t)frame[4096];
+}
+
 static void
 test_thread_stacks(void)
 {
@@ -638,6 +656,44 @@ test_thread_stacks(void)
             size >= ((size_t)8 << 20),
          "a thread asking for more keeps what it asked for");
    pthread_attr_destroy(&small);
+
+   /* Many threads at once, each using most of its stack, half joined and half
+    * detached: every stack comes from direct memory and goes back. */
+   enum { THREADS = 96 };
+   const long long direct_before = host_direct_allocations();
+   pthread_t threads[THREADS];
+   bool created = true;
+   __atomic_store_n(&deep_done, 0, __ATOMIC_RELEASE);
+   __atomic_store_n(&deep_release, 0, __ATOMIC_RELEASE);
+   for (int i = 0; i < THREADS; i++)
+      created &= pthread_create(&threads[i], NULL, deep_stack, NULL) == 0;
+   check(created, "thread stacks: 96 threads start at once");
+   unsigned live = 0, cached = 0;
+   ps5_thread_stacks(&live, &cached);
+   check(live >= THREADS, "thread stacks: each running thread's stack is direct memory");
+   __atomic_store_n(&deep_release, 1, __ATOMIC_RELEASE);
+   bool joined = true;
+   for (int i = 0; i < THREADS; i++) {
+      if (i % 2)
+         joined &= pthread_detach(threads[i]) == 0;
+      else
+         joined &= pthread_join(threads[i], NULL) == 0;
+   }
+   for (int i = 0; i < 400 && __atomic_load_n(&deep_done, __ATOMIC_ACQUIRE) < THREADS; i++)
+      usleep(5000);
+   for (int i = 0; i < 400 && host_direct_allocations() > direct_before + 32; i++)
+      usleep(5000);
+   check(joined && __atomic_load_n(&deep_done, __ATOMIC_ACQUIRE) == THREADS,
+         "thread stacks: every thread ran 1.5 MiB deep, joined or detached");
+   check(host_direct_allocations() <= direct_before + 32,
+         "thread stacks: ended threads' stacks are freed, a few kept for reuse");
+   pthread_attr_t detached;
+   pthread_attr_init(&detached);
+   pthread_attr_setdetachstate(&detached, PTHREAD_CREATE_DETACHED);
+   pthread_t one;
+   check(pthread_create(&one, &detached, deep_stack, NULL) == 0,
+         "thread stacks: a thread created detached starts");
+   pthread_attr_destroy(&detached);
 }
 
 static void
