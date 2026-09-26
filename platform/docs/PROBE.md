@@ -113,3 +113,26 @@ at 0x10_0000_0000 and above.
 `sceKernelJitCreateSharedMemory` is exported (under libkernel_web's JIT
 libraries) and resolves, but returns 0x80020001 to the title: the interface is
 not granted to it. Executable code goes through direct memory.
+
+## Files
+
+`ps5_platform_probe_files` (src/probe_files.c) writes 256 MiB in a file of
+the RetroArch title's own folder, reads it back and compares it
+(evidence/probe-2026-09-26-files):
+
+| How | Write | 256 MiB in |
+|---|---|---|
+| `write()`, 100 KiB at a time | 26.4 MiB/s | 9.7 s |
+| `write()`, 1 MiB at a time | 152.0 MiB/s | 1.7 s |
+| `write()`, 16 MiB at a time | 231.4 MiB/s | 1.1 s |
+| `write()` with `O_DIRECT`, 16 MiB | 229.4 MiB/s | 1.1 s |
+| `fwrite()` of 16 MiB, the stream's own buffer | 13.2 MiB/s | 19.4 s |
+| the same with a 1 MiB `setvbuf()` buffer | 10.4 MiB/s | 24.5 s |
+| the same with a 4 MiB `setvbuf()` buffer | 3.1 MiB/s | 82.4 s |
+
+A `write()` costs about 3.3 ms whatever its size, then about 260 MiB/s, and
+`fsync()` adds nothing measurable. Reads come back at 1.9-3.7 GiB/s. stdio is
+the slow path: slower than any `write()`, and slower still with a larger
+buffer, the opposite of FreeBSD's `fwrite()`, which writes large data directly.
+A file written whole and large belongs on the descriptor, in chunks of a
+megabyte or more; stdio suits small writes, which it gathers.

@@ -1,0 +1,15 @@
+platform-probe: files begin directory=/app0 bytes=268435456
+platform-probe: files buffered chunk=102400 write 26.4 MiB/s (9707 ms, 9708 ms with fsync) read 2127.2 MiB/s (120 ms) same
+platform-probe: files check PASS buffered chunk=102400 reads back what it wrote
+platform-probe: files buffered chunk=1048576 write 152.0 MiB/s (1684 ms, 1685 ms with fsync) read 3679.7 MiB/s (70 ms) same
+platform-probe: files check PASS buffered chunk=1048576 reads back what it wrote
+platform-probe: files buffered chunk=16777216 write 231.4 MiB/s (1106 ms, 1113 ms with fsync) read 2874.0 MiB/s (89 ms) same
+platform-probe: files check PASS buffered chunk=16777216 reads back what it wrote
+platform-probe: files direct chunk=16777216 write 229.4 MiB/s (1116 ms, 1117 ms with fsync) read 1910.3 MiB/s (134 ms) same
+platform-probe: files stdio buffer=0 setvbuf=0 write 13.2 MiB/s (19364 ms) same
+platform-probe: files check PASS stdio buffer=0 reads back what it wrote
+platform-probe: files stdio buffer=1048576 setvbuf=0 write 10.4 MiB/s (24548 ms) same
+platform-probe: files check PASS stdio buffer=1048576 reads back what it wrote
+platform-probe: files stdio buffer=4194304 setvbuf=0 write 3.1 MiB/s (82371 ms) same
+platform-probe: files check PASS stdio buffer=4194304 reads back what it wrote
+platform-probe: files end failures=0
