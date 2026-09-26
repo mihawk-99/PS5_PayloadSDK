@@ -537,7 +537,7 @@ test_probe_files(void)
    struct probe_lines seen = {0};
    check(ps5_platform_probe_files(probe_line, &seen, directory) == 0,
          "files: the probe reports no failure");
-   check(seen.passes == 3, "files: all three chunk sizes read back what they wrote");
+   check(seen.passes == 6, "files: every chunk size and stdio buffer reads back what it wrote");
    check(rmdir(directory) == 0, "files: the probe leaves its directory empty");
 }
 

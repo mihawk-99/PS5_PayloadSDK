@@ -12,9 +12,12 @@
  * 256 MiB are written in chunks of 100 KiB (RetroArch's save-state chunk),
  * 1 MiB and 16 MiB, timed to the last write() and again after fsync(), then
  * read back in the same chunks and compared word for word; the 16 MiB chunk
- * is tried once more with O_DIRECT. The file is the probe's own,
- * ps5-platform-probe.tmp, removed after each pass. Only libc is used, so the
- * host tests run it too.
+ * is tried once more with O_DIRECT. The same 256 MiB are then written
+ * through stdio, fwrite() of 16 MiB at a time, with the stream's own buffer
+ * and with setvbuf() buffers of 1 MiB and 4 MiB: RetroArch writes its files
+ * that way, and FreeBSD's fwrite() writes large data directly but one buffer's
+ * worth per write(). The file is the probe's own, ps5-platform-probe.tmp,
+ * removed after each pass. Only libc is used, so the host tests run it too.
  */
 #include "ps5platform/probe.h"
 
@@ -138,6 +141,43 @@ file_pass(struct file_probe *p, const char *path, uint64_t *buffer, size_t chunk
    return ok && same;
 }
 
+/* One stdio pass: fopen("wb"), a buffer of `buffer_bytes` (0: the stream's own),
+ * fwrite() of FILE_PROBE_CHUNK_MAX at a time, fclose(); the file is read back
+ * with read() and compared. */
+static bool
+file_stdio_pass(struct file_probe *p, const char *path, uint64_t *buffer, size_t buffer_bytes)
+{
+   FILE *const file = fopen(path, "wb");
+   if (file == NULL) {
+      file_say(p, "stdio buffer=%zu fopen errno=%d", buffer_bytes, errno);
+      return false;
+   }
+   const int buffered = buffer_bytes ? setvbuf(file, NULL, _IOFBF, buffer_bytes) : 0;
+   struct timespec start;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   bool ok = true;
+   for (uint64_t at = 0; ok && at < FILE_PROBE_BYTES; at += FILE_PROBE_CHUNK_MAX) {
+      file_fill(buffer, at, FILE_PROBE_CHUNK_MAX);
+      ok = fwrite(buffer, 1, FILE_PROBE_CHUNK_MAX, file) == FILE_PROBE_CHUNK_MAX;
+   }
+   ok = fclose(file) == 0 && ok;
+   const double written_ms = file_ms_since(&start);
+   bool same = false;
+   const int fd = ok ? open(path, O_RDONLY) : -1;
+   if (fd >= 0) {
+      same = true;
+      for (uint64_t at = 0; same && at < FILE_PROBE_BYTES; at += FILE_PROBE_CHUNK_MAX)
+         same = read(fd, buffer, FILE_PROBE_CHUNK_MAX) == (ssize_t)FILE_PROBE_CHUNK_MAX &&
+                file_matches(buffer, at, FILE_PROBE_CHUNK_MAX);
+      close(fd);
+   }
+   unlink(path);
+   const double mib = (double)FILE_PROBE_BYTES / (1024.0 * 1024.0);
+   file_say(p, "stdio buffer=%zu setvbuf=%d write %.1f MiB/s (%.0f ms) %s", buffer_bytes,
+            buffered, mib * 1e3 / written_ms, written_ms, same ? "same" : "DIFFERENT");
+   return ok && same;
+}
+
 int
 ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *directory)
 {
@@ -171,6 +211,13 @@ ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *direct
    /* Informational: a file system may refuse direct I/O, which is an answer. */
    (void)file_pass(&p, path, buffer, FILE_PROBE_CHUNK_MAX, O_DIRECT, "direct");
 #endif
+   static const size_t stdio_buffers[] = {0, 1024u * 1024u, 4u * 1024u * 1024u};
+   for (size_t i = 0; i < sizeof(stdio_buffers) / sizeof(stdio_buffers[0]); i++) {
+      const bool passed = file_stdio_pass(&p, path, buffer, stdio_buffers[i]);
+      p.failures += passed ? 0 : 1;
+      file_say(&p, "check %s stdio buffer=%zu reads back what it wrote",
+               passed ? "PASS" : "FAIL", stdio_buffers[i]);
+   }
    munmap(mapped, FILE_PROBE_CHUNK_MAX);
    file_say(&p, "end failures=%d", p.failures);
    return p.failures;
