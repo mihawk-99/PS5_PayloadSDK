@@ -514,7 +514,8 @@ test_directories(void)
 }
 
 /* The file probe (src/probe_files.c) in a directory of its own: every pass
- * reads back what it wrote, and nothing is left behind. */
+ * reads back what it wrote, and nothing is left behind. The thread probe
+ * (src/probe_threads.c) reports both threads' stacks. */
 struct probe_lines {
    unsigned passes;
    unsigned lines;
@@ -525,7 +526,7 @@ probe_line(void *context, const char *line)
 {
    struct probe_lines *const seen = context;
    seen->lines++;
-   if (strstr(line, "check PASS") != NULL && strstr(line, "reads back what it wrote") != NULL)
+   if (strstr(line, "check PASS") != NULL)
       seen->passes++;
 }
 
@@ -541,6 +542,14 @@ test_probe_files(void)
    check(rmdir(directory) == 0, "files: the probe leaves its directory empty");
 }
 
+static void
+test_probe_threads(void)
+{
+   struct probe_lines seen = {0};
+   check(ps5_platform_probe_threads(probe_line, &seen) == 0, "threads: the probe reports no failure");
+   check(seen.passes == 2, "threads: both threads report their stacks");
+}
+
 int
 main(void)
 {
@@ -550,6 +559,9 @@ main(void)
    printf("%s\n", "test_probe_files");
    fflush(stdout);
    test_probe_files();
+   printf("%s\n", "test_probe_threads");
+   fflush(stdout);
+   test_probe_threads();
    printf("%s\n", "test_exec_anywhere");
    fflush(stdout);
    test_exec_anywhere();

@@ -40,6 +40,12 @@ int ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags);
  * 1 MiB and 4 MiB ones. Returns how many checks failed. */
 int ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *directory);
 
+/* The thread test (src/probe_threads.c): the stack size a fresh attribute
+ * object reports, the calling thread's stack, and the stacks a thread created
+ * with no attributes and one asking for 2 MiB run on, read back from inside
+ * each. Returns how many checks failed. */
+int ps5_platform_probe_threads(ps5_probe_log_fn log, void *context);
+
 #ifdef __cplusplus
 }
 #endif
