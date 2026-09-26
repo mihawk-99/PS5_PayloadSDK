@@ -1,0 +1,65 @@
+build identity: 5d49f82d2cf384b4861d08ec6192fd7aef0939f6af473cc631393dc60458fc7b
+platform-probe: begin flags=0x4
+platform-probe: identity sw_version_result=0x00000000 sw_version_text=12.090.001 sw_version=0x12090001
+platform-probe: identity kern_sdk_version_result=0 kern_sdk_version=0x10010000
+platform-probe: pool direct_size=12884901888 direct_available=12815695872 direct_available_start=0x4200000 flexible_configured_result=0x00000000 flexible_configured=469762048 flexible_available=422576128 tsc_hz=1596300211
+platform-probe: exec map_time_protection=0x5 result=0x80020016
+platform-probe: exec map_time_protection=0x7 result=0x80020016
+platform-probe: exec mprotect_rx_result=0x00000000 returned=0x12345678 address=0x404000000
+platform-probe: check PASS read-write direct memory made executable with sceKernelMprotect runs its code
+platform-probe: exec mprotect_rwx_result=0x00000000 rewritten_returned=0x9abcdef0
+platform-probe: pool largest_allocation=12750684160 attempts=8
+platform-probe: check PASS one direct allocation of 4 GiB or more
+platform-probe: placement anchor=0xf404c0 anchor_in_gpu_window=0
+platform-probe: placement unhinted_result=0x00000000 unhinted_address=0x200020000 in_gpu_window=1
+platform-probe: placement hint=0x10000000 reserved=0x10000000 distance=252443456..789314368 in_reach=1 in_gpu_window=0 fixed_map_result=0x00000000 at_hint=1 ran=1
+platform-probe: placement hint=0x20000000 reserved=0x20000000 distance=520878912..1057749824 in_reach=1 in_gpu_window=0 fixed_map_result=0x00000000 at_hint=1 ran=1
+platform-probe: placement hint=0x30000000 reserved=0x30000000 distance=789314368..1326185280 in_reach=1 in_gpu_window=0 fixed_map_result=0x00000000 at_hint=1 ran=1
+platform-probe: placement hint=0x40000000 reserved=0x40000000 distance=1057749824..1594620736 in_reach=1 in_gpu_window=0 fixed_map_result=0x00000000 at_hint=1 ran=1
+platform-probe: placement hint=0x50000000 reserved=0x50000000 distance=1326185280..1863056192 in_reach=1 in_gpu_window=0 fixed_map_result=0x00000000 at_hint=1 ran=1
+platform-probe: placement hint=0x60000000 reserved=0x60000000 distance=1594620736..2131491648 in_reach=0 in_gpu_window=0 fixed_map_result=0x00000000 at_hint=1 ran=1
+platform-probe: check PASS executable direct memory placed at a fixed address within 2 GiB of the anchor, outside the GPU window
+platform-probe: check PASS 64 direct regions of 64 KiB mapped read-write
+platform-probe: rewrite one_region cycles=5000 wrong=0 refused=0 total_ns=270828734
+platform-probe: check PASS 5000 write/execute cycles on one region
+platform-probe: rewrite many_regions regions=64 rounds=100 wrong=0 refused=0 total_ns=338610367
+platform-probe: check PASS 6400 write/execute cycles across 64 regions
+platform-probe: rewrite mprotect_page_ns=26452
+platform-probe: rewrite mprotect_mib_ns=27366
+platform-probe: concurrent page_toggle threads=4 cycles=3000 wrong=0 refused=0 thread_calls=490724457 thread_wrong=0
+platform-probe: check PASS a page rewritten with per-page toggles while four threads run its neighbour
+platform-probe: concurrent dual_view rx_result=0x00000000 distinct_views=1 threads=4 cycles=5000 wrong=0 thread_calls=1575300 thread_wrong=0
+platform-probe: check PASS code written through a read-write view runs through a read-execute view of the same allocation, while four threads run it
+platform-probe: fault reserve_result=0x00000000 guard_page=1
+platform-probe: fault reserved signal=11 code=2 reported_matches=1 escaped=0 returned=0xfa017000 rip_word=28
+platform-probe: fault context rax=15 rcx=12 rdx=11 rsi=10 rdi=9 rbp=17 r8=13 r9=14 r10=18 r11=19 r12=20 r13=21 r14=22 r15=23 rip=28 mcontext_offset_words=8
+platform-probe: check PASS a read of a reserved, unmapped address faults, and the handler's backpatch runs
+platform-probe: fault sites=200 recovered=200 rerun_without_fault=200 unknown=0 total_ns=10795513 last_signal=11
+platform-probe: check PASS 200 fault sites in direct-memory code, each backpatched from the handler
+platform-probe: reuse cycles=200 ran=200 failed=0 direct_before=12815695872 direct_after=12815695872 flexible_before=422576128 flexible_after=422576128
+platform-probe: check PASS 200 reserve/allocate/map/run/release cycles return direct and flexible memory to baseline
+platform-probe: huge survey hint=0x0 largest=16106127360 at=0x404000000 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey hint=0x400000000 largest=16106127360 at=0x404000000 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey hint=0x600000000 largest=7516192768 at=0x600000000 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey hint=0x800000000 largest=17179869184 at=0xfe0480000 in_gpu_window=0 refusal=0x00000000
+platform-probe: huge survey hint=0x1000000000 largest=17179869184 at=0x1000000000 in_gpu_window=0 refusal=0x00000000
+platform-probe: huge survey hint=0x2000000000 largest=17179869184 at=0x2000000000 in_gpu_window=0 refusal=0x00000000
+platform-probe: huge survey hint=0x4000000000 largest=17179869184 at=0x4000000000 in_gpu_window=0 refusal=0x00000000
+platform-probe: huge survey hint=0x8000000000 largest=17179869184 at=0x8000000000 in_gpu_window=0 refusal=0x00000000
+platform-probe: huge survey hint=0x10000000000 largest=0 at=0x0 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey hint=0x40000000000 largest=0 at=0x0 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey hint=0x100000000000 largest=0 at=0x0 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey hint=0x400000000000 largest=0 at=0x0 in_gpu_window=0 refusal=0x8002000c
+platform-probe: huge survey best=0xfe0480000 best_bytes=17179869184
+platform-probe: huge single bytes=10737418240 hint=0xfe0480000 allocation=0x00000000 map=0x00000000 view=ff0000000 in_gpu_window=0 wrong_words=0 fill_ns=675321763 verify_ns=1012964786 direct_before=12815695872 direct_during=2078277632 flexible_before=422576128 flexible_during=422576128
+platform-probe: check PASS one 10 GiB direct allocation is mapped and every word of it written and read back
+platform-probe: check PASS the 10 GiB comes out of direct memory (the largest free block shrinks by at least 10 GiB) and flexible memory is unchanged
+platform-probe: huge single direct_after=12815695872
+platform-probe: check PASS releasing the 10 GiB returns direct memory to baseline
+platform-probe: huge pieces pieces=10 piece_bytes=1073741824 base=0xfe0480000 allocated=10 mapped=10 adjacent=0 in_gpu_window=0 first_error=0x00000000 wrong_words=0 fill_ns=686647640 verify_ns=1018659292 flexible_before=422576128 flexible_during=422576128
+platform-probe: check PASS ten 1 GiB direct allocations are mapped at once, every word written and read back
+platform-probe: check PASS the ten pieces are not charged to flexible memory
+platform-probe: huge pieces direct_after=12815695872
+platform-probe: check PASS releasing the ten pieces returns direct memory to baseline
+platform-probe: check PASS the probe leaves direct and flexible memory as it found them
+platform-probe: end failures=0 flexible_start=422576128 flexible_end=422576128 direct_start=12815695872 direct_end=12815695872
