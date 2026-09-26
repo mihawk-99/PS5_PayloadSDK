@@ -10,6 +10,7 @@
 #include "ps5platform/exec.h"
 #include "ps5platform/heap.h"
 #include "ps5platform/kernel.h"
+#include "ps5platform/klog.h"
 #include "ps5platform/libc.h"
 #include "ps5platform/shm.h"
 

@@ -12,6 +12,7 @@
 #include "host_kernel.h"
 #include "ps5platform/exec.h"
 #include "ps5platform/heap.h"
+#include "ps5platform/klog.h"
 #include "ps5platform/kernel.h"
 #include "ps5platform/libc.h"
 #include "ps5platform/platform.h"
@@ -918,6 +919,25 @@ test_heap(void)
    check(threads_intact, "heap: eight threads allocating and freeing keep every block intact");
 }
 
+static void
+test_klog(void)
+{
+   const int saved = dup(STDERR_FILENO);
+   check(ps5_klog_capture_stderr("[t] ") == 0, "klog: standard error is captured");
+   check(ps5_klog_capture_stderr("[again] ") == 0, "klog: a second capture does nothing");
+   fprintf(stderr, "radv/ps5: first\nsecond ");
+   fprintf(stderr, "line\n");
+   char text[8192] = "";
+   for (int i = 0; i < 200 && !strstr(text, "second line"); i++) {
+      usleep(5000);
+      host_klog_text(text, sizeof(text));
+   }
+   check(strstr(text, "[t] radv/ps5: first\n") != NULL && strstr(text, "[t] second line\n") != NULL,
+         "klog: each line of standard error is one klog record with the prefix");
+   dup2(saved, STDERR_FILENO);
+   close(saved);
+}
+
 int
 main(void)
 {
@@ -971,6 +991,9 @@ main(void)
    printf("%s\n", "test_directories");
    fflush(stdout);
    test_directories();
+   printf("%s\n", "test_klog");
+   fflush(stdout);
+   test_klog();
    printf("%s\n", "test_heap");
    fflush(stdout);
    test_heap();

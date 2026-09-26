@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -359,4 +360,31 @@ sysctl(const int *name, unsigned int length, void *old_value, size_t *old_length
    (void)new_length;
    errno = ENOENT;
    return -1;
+}
+
+/* ------------------------------------------------------------------ klog */
+
+static char klog_text[8192];
+static size_t klog_length;
+
+int
+sceKernelDebugOutText(int channel, const char *text)
+{
+   (void)channel;
+   pthread_mutex_lock(&lock);
+   const size_t length = strlen(text);
+   if (klog_length + length < sizeof(klog_text)) {
+      memcpy(klog_text + klog_length, text, length + 1);
+      klog_length += length;
+   }
+   pthread_mutex_unlock(&lock);
+   return 0;
+}
+
+void
+host_klog_text(char *out, unsigned long size)
+{
+   pthread_mutex_lock(&lock);
+   snprintf(out, size, "%s", klog_text);
+   pthread_mutex_unlock(&lock);
 }

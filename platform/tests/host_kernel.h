@@ -21,5 +21,7 @@ enum {
 void host_fail(int call, int nth);
 /* Direct-memory allocations outstanding. */
 long long host_direct_allocations(void);
+/* What sceKernelDebugOutText has written, as one string. */
+void host_klog_text(char *out, unsigned long size);
 
 #endif /* PS5PLATFORM_HOST_KERNEL_H */
