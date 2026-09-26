@@ -752,6 +752,39 @@ probe_reuse(struct probe *p)
          "baseline");
 }
 
+/* ---- views at page offsets --------------------------------------------------- */
+
+/* A direct allocation is made in 64 KiB units; whether a view of it may start
+ * at any 16 KiB page, as PPSSPP's VRAM view does (80 KiB in): the allocation
+ * mapped whole, and a page of it at 80 KiB mapped again, must be one memory. */
+static void
+probe_page_views(struct probe *p)
+{
+   const size_t bytes = 128 * KIB;
+   int64_t start = -1;
+   const int32_t allocation = direct_allocate(bytes, &start);
+   void *whole = (void *)(VIEW_HINT + 3 * GIB);
+   const int32_t whole_map = allocation == 0 ? direct_map(&whole, bytes, PROT_RW, 0, start) : -1;
+   void *page = (void *)(VIEW_HINT + 3 * GIB + GIB / 2);
+   const int32_t page_map =
+      whole_map == 0 ? direct_map(&page, 16 * KIB, PROT_RW, 0, start + 80 * (int64_t)KIB) : -1;
+   bool alias = false;
+   if (page_map == 0) {
+      ((volatile uint8_t *)whole)[80 * KIB + 9] = 0x77;
+      ((volatile uint8_t *)page)[10] = 0x78;
+      alias = ((volatile uint8_t *)page)[9] == 0x77 && ((volatile uint8_t *)whole)[80 * KIB + 10] == 0x78;
+      sceKernelMunmap(page, 16 * KIB);
+   }
+   if (whole_map == 0)
+      sceKernelMunmap(whole, bytes);
+   if (allocation == 0)
+      sceKernelReleaseDirectMemory(start, bytes);
+   say(p, "views page_offset=%zu whole_map=0x%08x page_map=0x%08x alias=%u", 80 * KIB,
+       (unsigned)whole_map, (unsigned)page_map, (unsigned)alias);
+   check(p, page_map == 0 && alias,
+         "a view of direct memory may start at a 16 KiB page off the 64 KiB unit, and is that memory");
+}
+
 /* ---- 4 GiB of guest memory beside 1 GiB of code ---------------------------- */
 
 static void
@@ -1134,6 +1167,7 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
    probe_concurrent(&p);
    probe_faults(&p);
    probe_reuse(&p);
+   probe_page_views(&p);
    if (flags & PS5_PROBE_LARGE)
       probe_large(&p);
    if (flags & PS5_PROBE_HUGE) {

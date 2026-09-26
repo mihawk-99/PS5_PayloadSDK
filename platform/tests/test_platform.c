@@ -361,6 +361,17 @@ test_shm(void)
          "shm: a second view of its middle");
    ((volatile uint8_t *)a)[(1 << 20) + 5] = 0x5a;
    check(((volatile uint8_t *)b)[5] == 0x5a, "shm: written through one view, read through the other");
+   /* A view at a 16 KiB page offset, off the 64 KiB unit (PPSSPP's VRAM view
+    * starts at 80 KiB); one at an offset off the page is refused. */
+   void *paged = NULL;
+   check(ps5_shm_map(&shm, 0x14000, 0x4000, NULL, PS5_SHM_READ | PS5_SHM_WRITE, 0, &paged) == 0,
+         "shm: a view at an offset of 80 KiB");
+   ((volatile uint8_t *)a)[0x14000 + 9] = 0x77;
+   check(paged && ((volatile uint8_t *)paged)[9] == 0x77, "shm: and it is that page of the object");
+   ps5_shm_unmap(paged, 0x4000, 0);
+   check(ps5_shm_map(&shm, 0x1000, 0x4000, NULL, PS5_SHM_READ | PS5_SHM_WRITE, 0, &paged) ==
+            PS5_SHM_BAD_REQUEST,
+         "shm: an offset off the 16 KiB page is refused");
    /* An arena: a reserved range, a view mapped into it, a hole kept reserved. */
    void *arena = NULL;
    check(ps5_vrange_reserve(16 << 20, NULL, 0, &arena) == 0, "shm: an arena reserved");

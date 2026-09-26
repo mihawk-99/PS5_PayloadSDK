@@ -66,7 +66,9 @@ ps5_shm_map(const struct ps5_shm *shm, size_t offset, size_t bytes, void *addres
 {
    if (view)
       *view = NULL;
-   if (!shm || !view || bytes == 0 || offset % PS5P_DIRECT_UNIT != 0 ||
+   /* The object is allocated in 64 KiB units; a view of it needs only the
+    * kernel's 16 KiB page (PPSSPP maps VRAM at an offset of 80 KiB). */
+   if (!shm || !view || bytes == 0 || offset % PS5P_PAGE != 0 ||
        bytes % PS5P_PAGE != 0 || offset + bytes > shm->bytes ||
        ((flags & PS5_SHM_FIXED) && (uintptr_t)address % PS5P_PAGE != 0))
       return PS5_SHM_BAD_REQUEST;
