@@ -657,8 +657,36 @@ test_posix(void)
    check(ps5_strtod_l(number, &number_end, c_locale) == 32.5 && number_end == number + 6,
          "strtod_l parses with '.'");
    check(ps5_strtof_l("0.5", NULL, c_locale) == 0.5f, "strtof_l parses with '.'");
-   ps5_freelocale(c_locale);
    check(ps5_dladdr((const void *)test_posix, NULL) == 0, "dladdr reports nothing");
+
+   char *end = NULL;
+   check(ps5_strtoll_l("-42z", &end, 10, c_locale) == -42 && *end == 'z', "strtoll_l");
+   char formatted[32];
+   check(ps5_snprintf_l(formatted, sizeof(formatted), c_locale, "%d:%.1f", 7, 2.5) == 5 &&
+            strcmp(formatted, "7:2.5") == 0,
+         "snprintf_l");
+   int scanned = 0;
+   check(ps5_sscanf_l("x=13", c_locale, "x=%d", &scanned) == 1 && scanned == 13, "sscanf_l");
+   const char *narrow = "abc";
+   wchar_t wide[8];
+   mbstate_t state;
+   memset(&state, 0, sizeof(state));
+   check(ps5_mbsnrtowcs_l(wide, &narrow, 2, 8, &state, c_locale) == 2 && wide[0] == L'a' &&
+            wide[1] == L'b' && narrow != NULL && *narrow == 'c',
+         "mbsnrtowcs_l stops at its byte bound");
+   const wchar_t *wide_in = L"xyz";
+   char bytes[8];
+   memset(&state, 0, sizeof(state));
+   check(ps5_wcsnrtombs_l(bytes, &wide_in, 4, sizeof(bytes), &state, c_locale) == 3 &&
+            memcmp(bytes, "xyz", 4) == 0 && wide_in == NULL,
+         "wcsnrtombs_l converts through the terminator");
+   check(ps5_catopen("messages", 0) == (void *)-1 &&
+            strcmp(ps5_catgets((void *)-1, 1, 1, "own"), "own") == 0,
+         "catalogues: none open, catgets gives the caller's string");
+   void *frames[8];
+   check(ps5_backtrace(frames, 8) > 1, "backtrace walks the calling thread");
+
+   ps5_freelocale(c_locale);
 
    struct ps5_regex re;
    memset(&re, 0, sizeof(re));

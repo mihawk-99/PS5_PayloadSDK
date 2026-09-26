@@ -50,6 +50,8 @@
 #include <sys/statvfs.h>
 #include <sys/types.h>
 #include <time.h>
+#include <wchar.h>
+#include <wctype.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -133,6 +135,51 @@ void *ps5_newlocale(int category_mask, const char *name, void *base);
 void ps5_freelocale(void *locale);
 double ps5_strtod_l(const char *s, char **end, void *locale);
 float ps5_strtof_l(const char *s, char **end, void *locale);
+
+/* FreeBSD's xlocale family in the C locale (src/xlocale.c): each does what its
+ * plain counterpart does. The locale arguments are locale_t's, the catalogues
+ * nl_catd's. */
+struct lconv *ps5_localeconv_l(void *locale);
+long long ps5_strtoll_l(const char *s, char **end, int base, void *locale);
+unsigned long long ps5_strtoull_l(const char *s, char **end, int base, void *locale);
+long double ps5_strtold_l(const char *s, char **end, void *locale);
+int ps5_snprintf_l(char *out, size_t size, void *locale, const char *format, ...);
+int ps5_sscanf_l(const char *in, void *locale, const char *format, ...);
+int ps5_asprintf_l(char **out, void *locale, const char *format, ...);
+int ps5_strcoll_l(const char *a, const char *b, void *locale);
+size_t ps5_strxfrm_l(char *out, const char *in, size_t size, void *locale);
+size_t ps5_strftime_l(char *out, size_t size, const char *format, const struct tm *time, void *locale);
+int ps5_wcscoll_l(const wchar_t *a, const wchar_t *b, void *locale);
+size_t ps5_wcsxfrm_l(wchar_t *out, const wchar_t *in, size_t size, void *locale);
+wint_t ps5_btowc_l(int c, void *locale);
+int ps5_wctob_l(wint_t c, void *locale);
+int ps5_iswctype_l(wint_t c, wctype_t class_mask, void *locale);
+size_t ps5_mbrlen_l(const char *s, size_t n, mbstate_t *state, void *locale);
+size_t ps5_mbrtowc_l(wchar_t *out, const char *s, size_t n, mbstate_t *state, void *locale);
+size_t ps5_mbsrtowcs_l(wchar_t *out, const char **in, size_t size, mbstate_t *state, void *locale);
+size_t ps5_mbsnrtowcs_l(wchar_t *out, const char **in, size_t in_bytes, size_t size, mbstate_t *state,
+                        void *locale);
+size_t ps5_wcrtomb_l(char *out, wchar_t c, mbstate_t *state, void *locale);
+size_t ps5_wcsnrtombs_l(char *out, const wchar_t **in, size_t in_chars, size_t size, mbstate_t *state,
+                        void *locale);
+int ps5_mbtowc_l(wchar_t *out, const char *s, size_t n, void *locale);
+#if defined(__FreeBSD__)
+/* FreeBSD's ctype internals, from the console's own C rune table. */
+int ps5____mb_cur_max_l(void *locale);
+unsigned long ps5____runetype_l(int c, void *locale);
+int ps5____tolower_l(int c, void *locale);
+int ps5____toupper_l(int c, void *locale);
+const void *ps5___runes_for_locale(void *locale, int *mb_sb_limit);
+#endif
+/* A title has no message catalogue: opening one fails, and catgets gives the
+ * caller's own string. */
+void *ps5_catopen(const char *name, int flag);
+char *ps5_catgets(void *catalogue, int set, int message, const char *fallback);
+int ps5_catclose(void *catalogue);
+/* The calling thread's return addresses, through the title's unwinder; the
+ * symbols form writes them as addresses. */
+int ps5_backtrace(void **frames, int size);
+void ps5_backtrace_symbols_fd(void *const *frames, int count, int fd);
 
 /* An address's object and symbol: a title's executable carries no table to
  * answer from, so this reports nothing, as dladdr does for an unknown address.
