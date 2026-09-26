@@ -43,11 +43,18 @@ sdk=$1
 revision=$2
 cache=${3:-$(dirname -- "$sdk")}
 [[ $revision =~ ^[0-9a-f]{40}$ ]] || { echo "revision must be a full commit id" >&2; exit 2; }
-for command in wget unzip sha256sum make; do
+for command in flock wget unzip sha256sum make; do
     command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 2; }
 done
 
 mkdir -p -- "$cache"
+# One install at a time: a project's make runs its targets in parallel, and
+# each asks for the SDK. Whoever waited finds it installed and stops.
+exec 9>"$cache/.ps5-sdk.lock"
+flock 9
+if [[ -f $sdk/.ps5-sdk-revision && $(<"$sdk/.ps5-sdk-revision") == "$revision" ]]; then
+    exit 0
+fi
 archive="$cache/ps5-payload-sdk.zip"
 if [[ -f $archive ]] &&
     ! printf '%s  %s\n' "$release_hash" "$archive" | sha256sum --check --strict >/dev/null 2>&1; then
