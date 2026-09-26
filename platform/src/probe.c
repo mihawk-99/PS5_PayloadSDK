@@ -164,7 +164,7 @@ probe_identity(struct probe *p)
 }
 
 /* The largest single allocation, to 64 MiB, found by allocating and releasing. */
-static void
+static size_t
 probe_largest(struct probe *p)
 {
    const size_t step = 64 * MIB;
@@ -190,6 +190,7 @@ probe_largest(struct probe *p)
    }
    say(p, "pool largest_allocation=%zu attempts=%u", low, attempts);
    check(p, low >= 4 * GIB, "one direct allocation of 4 GiB or more");
+   return low;
 }
 
 /* ---- executable direct memory ---------------------------------------------- */
@@ -1015,6 +1016,91 @@ probe_huge_pieces(struct probe *p, uintptr_t hint)
          "releasing the ten pieces returns direct memory to baseline");
 }
 
+/* ---- the whole pool at once --------------------------------------------------- */
+
+/* Where the full test maps: measured to grant 16 GiB at the hint itself
+ * (evidence/probe-2026-09-25-huge). */
+#define FULL_HINT ((uintptr_t)0x1000000000ull)
+#define LEFTOVER_MAX 512
+
+/* How much direct memory can still be allocated: 64 MiB pieces until one is
+ * refused, then 1 MiB, then 64 KiB ones; all released before returning. */
+static size_t
+allocatable(unsigned *pieces)
+{
+   static const size_t sizes[] = {64 * MIB, MIB, 64 * KIB};
+   int64_t starts[LEFTOVER_MAX];
+   size_t lengths[LEFTOVER_MAX];
+   unsigned count = 0;
+   size_t total = 0;
+   for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++)
+      while (count < LEFTOVER_MAX && direct_allocate(sizes[s], &starts[count]) == 0) {
+         lengths[count++] = sizes[s];
+         total += sizes[s];
+      }
+   for (unsigned i = 0; i < count; i++)
+      sceKernelReleaseDirectMemory(starts[i], lengths[i]);
+   *pieces = count;
+   return total;
+}
+
+/* The largest allocation probe_largest found, mapped read-write in one view,
+ * every word written and read back, and what is left while it is held. */
+static void
+probe_full(struct probe *p, size_t largest)
+{
+   const size_t flexible_before = available_flexible();
+   const size_t direct_before = available_direct(NULL);
+   unsigned pieces_before = 0;
+   const size_t allocatable_before = allocatable(&pieces_before);
+   say(p, "full baseline allocatable=%zu pieces=%u largest_block=%zu", allocatable_before,
+       pieces_before, direct_before);
+   size_t bytes = largest;
+   int64_t start = -1;
+   int32_t allocation = -1;
+   for (unsigned attempt = 0; attempt < 4 && bytes > 64 * MIB; attempt++, bytes -= 64 * MIB)
+      if ((allocation = direct_allocate(bytes, &start)) == 0)
+         break;
+   void *view = (void *)FULL_HINT;
+   const int32_t map = allocation == 0 ? direct_map(&view, bytes, PROT_RW, 0, start) : -1;
+   size_t wrong = bytes / 8;
+   uint64_t fill_ns = 0, verify_ns = 0;
+   size_t flexible_during = 0, largest_left = 0, allocatable_left = 0;
+   unsigned pieces_left = 0;
+   if (map == 0) {
+      uint64_t t = sceKernelReadTsc();
+      fill(view, bytes, 0, 0x3c3c);
+      fill_ns = ns_since(p, t);
+      t = sceKernelReadTsc();
+      wrong = count_wrong(view, bytes, 0, 0x3c3c);
+      verify_ns = ns_since(p, t);
+      flexible_during = available_flexible();
+      largest_left = available_direct(NULL);
+      allocatable_left = allocatable(&pieces_left);
+   }
+   say(p,
+       "full bytes=%zu allocation=0x%08x map=0x%08x view=%p in_gpu_window=%u wrong_words=%zu "
+       "fill_ns=%llu verify_ns=%llu flexible_before=%zu flexible_during=%zu",
+       bytes, (unsigned)allocation, (unsigned)map, map == 0 ? view : NULL,
+       (unsigned)(map == 0 && in_gpu_window((uintptr_t)view, bytes)), wrong,
+       (unsigned long long)fill_ns, (unsigned long long)verify_ns, flexible_before,
+       flexible_during);
+   say(p, "full left allocatable=%zu pieces=%u largest_block=%zu flexible=%zu", allocatable_left,
+       pieces_left, largest_left, flexible_during);
+   check(p, map == 0 && wrong == 0,
+         "the largest direct allocation is mapped and every word of it written and read back");
+   check(p, map == 0 && flexible_during == flexible_before,
+         "holding it leaves flexible memory unchanged");
+   if (map == 0)
+      sceKernelMunmap(view, bytes);
+   if (allocation == 0)
+      sceKernelReleaseDirectMemory(start, bytes);
+   const size_t direct_after = available_direct(NULL);
+   say(p, "full direct_after=%zu", direct_after);
+   check(p, direct_after == direct_before,
+         "releasing it returns direct memory to baseline");
+}
+
 /* ---- the JIT interface ------------------------------------------------------ */
 
 static void
@@ -1042,7 +1128,7 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
    probe_identity(&p);
    probe_map_exec(&p);
    probe_mprotect_exec(&p);
-   probe_largest(&p);
+   const size_t largest = probe_largest(&p);
    probe_placement(&p);
    probe_rewrite_cycles(&p);
    probe_concurrent(&p);
@@ -1055,6 +1141,8 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
       probe_huge_single(&p, place);
       probe_huge_pieces(&p, place);
    }
+   if (flags & PS5_PROBE_FULL)
+      probe_full(&p, largest);
    const size_t flexible_end = available_flexible();
    const size_t direct_end = available_direct(NULL);
    check(&p, flexible_end == flexible_start && direct_end == direct_start,

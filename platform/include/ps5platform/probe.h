@@ -26,6 +26,9 @@ typedef void (*ps5_probe_log_fn)(void *context, const char *line);
  * mapped and every word of it written and read back at once, as one
  * allocation and as ten 1 GiB allocations. */
 #define PS5_PROBE_HUGE 0x4u
+/* The full test: the largest direct allocation mapped, every word of it
+ * written and read back, and what can still be allocated while it is held. */
+#define PS5_PROBE_FULL 0x8u
 
 /* Runs every test and returns how many checks failed. */
 int ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags);
