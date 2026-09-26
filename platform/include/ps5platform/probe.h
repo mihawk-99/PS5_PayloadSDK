@@ -33,6 +33,12 @@ typedef void (*ps5_probe_log_fn)(void *context, const char *line);
 /* Runs every test and returns how many checks failed. */
 int ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags);
 
+/* The file test (src/probe_files.c): 256 MiB written in a file of `directory`
+ * in chunks of 100 KiB, 1 MiB and 16 MiB, timed to the last write and after
+ * fsync, read back and compared, then removed; once more with O_DIRECT, for
+ * its answer only. Returns how many checks failed. */
+int ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *directory);
+
 #ifdef __cplusplus
 }
 #endif

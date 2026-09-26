@@ -14,6 +14,7 @@
 #include "ps5platform/kernel.h"
 #include "ps5platform/libc.h"
 #include "ps5platform/platform.h"
+#include "ps5platform/probe.h"
 #include "ps5platform/shm.h"
 
 #include <errno.h>
@@ -512,12 +513,43 @@ test_directories(void)
    rmdir(root);
 }
 
+/* The file probe (src/probe_files.c) in a directory of its own: every pass
+ * reads back what it wrote, and nothing is left behind. */
+struct probe_lines {
+   unsigned passes;
+   unsigned lines;
+};
+
+static void
+probe_line(void *context, const char *line)
+{
+   struct probe_lines *const seen = context;
+   seen->lines++;
+   if (strstr(line, "check PASS") != NULL && strstr(line, "reads back what it wrote") != NULL)
+      seen->passes++;
+}
+
+static void
+test_probe_files(void)
+{
+   char directory[] = "/tmp/ps5-platform-files-XXXXXX";
+   check(mkdtemp(directory) != NULL, "files: a directory of its own");
+   struct probe_lines seen = {0};
+   check(ps5_platform_probe_files(probe_line, &seen, directory) == 0,
+         "files: the probe reports no failure");
+   check(seen.passes == 3, "files: all three chunk sizes read back what they wrote");
+   check(rmdir(directory) == 0, "files: the probe leaves its directory empty");
+}
+
 int
 main(void)
 {
    printf("%s\n", "test_model");
    fflush(stdout);
    test_model();
+   printf("%s\n", "test_probe_files");
+   fflush(stdout);
+   test_probe_files();
    printf("%s\n", "test_exec_anywhere");
    fflush(stdout);
    test_exec_anywhere();
