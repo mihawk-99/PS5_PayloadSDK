@@ -67,7 +67,7 @@ build/host/regex/%.o: src/regex/%.c $(REGEX_HEADERS)
 
 build/host/test_platform: $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HEADERS) $(wildcard tests/*.h)
 	@mkdir -p build/host
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) -o $@
+	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) -Wl,--wrap=pthread_create -o $@
 
 build/host/test_directory_records: src/directory.c tests/test_directory_records.c $(HEADERS)
 	@mkdir -p build/host

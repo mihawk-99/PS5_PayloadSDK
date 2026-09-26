@@ -42,6 +42,7 @@
 #define PS5PLATFORM_LIBC_H
 
 #include <dirent.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -137,6 +138,11 @@ float ps5_strtof_l(const char *s, char **end, void *locale);
  * answer from, so this reports nothing, as dladdr does for an unknown address.
  * info is a Dl_info. */
 int ps5_dladdr(const void *address, void *info);
+
+/* The stack a thread gets when its creator asks for none (or for less): the
+ * main thread's. A consumer linking with --wrap=pthread_create gets it for
+ * every such thread, its libraries' included (src/threads.c). */
+#define PS5_THREAD_STACK_BYTES ((size_t)2 << 20)
 
 /* What the SDK's assert.h and fortified string.h call. */
 void ps5___assert(const char *function, const char *file, int line, const char *expression)

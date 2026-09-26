@@ -571,6 +571,44 @@ compare_nested(void *thunk, const void *a, const void *b)
    return *(const int *)a - *(const int *)b;
 }
 
+static void *
+report_stack(void *out)
+{
+   pthread_attr_t running;
+   size_t size = 0;
+   if (pthread_getattr_np(pthread_self(), &running) == 0) {
+      pthread_attr_getstacksize(&running, &size);
+      pthread_attr_destroy(&running);
+   }
+   *(size_t *)out = size;
+   return NULL;
+}
+
+/* src/threads.c, linked with --wrap=pthread_create as consumers link it. */
+static void
+test_thread_stacks(void)
+{
+   size_t size = 0;
+   pthread_t thread;
+   check(pthread_create(&thread, NULL, report_stack, &size) == 0 && pthread_join(thread, NULL) == 0 &&
+            size >= PS5_THREAD_STACK_BYTES,
+         "a thread created without attributes gets the main thread's stack");
+   pthread_attr_t small;
+   pthread_attr_init(&small);
+   pthread_attr_setstacksize(&small, 65536);
+   pthread_attr_setdetachstate(&small, PTHREAD_CREATE_JOINABLE);
+   size = 0;
+   check(pthread_create(&thread, &small, report_stack, &size) == 0 && pthread_join(thread, NULL) == 0 &&
+            size >= PS5_THREAD_STACK_BYTES,
+         "a thread asking for 64 KiB gets the main thread's stack");
+   pthread_attr_setstacksize(&small, (size_t)8 << 20);
+   size = 0;
+   check(pthread_create(&thread, &small, report_stack, &size) == 0 && pthread_join(thread, NULL) == 0 &&
+            size >= ((size_t)8 << 20),
+         "a thread asking for more keeps what it asked for");
+   pthread_attr_destroy(&small);
+}
+
 static void
 test_posix(void)
 {
@@ -704,6 +742,9 @@ main(void)
    printf("%s\n", "test_posix");
    fflush(stdout);
    test_posix();
+   printf("%s\n", "test_thread_stacks");
+   fflush(stdout);
+   test_thread_stacks();
    printf("%s\n", "test_libc");
    fflush(stdout);
    test_libc();
