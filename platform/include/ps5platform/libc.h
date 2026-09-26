@@ -24,6 +24,8 @@
  *   regfree, regerror, __assert, __memset_chk
  *                          no system module exports them (the SDK's own
  *                          FreeBSD headers call the last two)
+ *   newlocale, freelocale, strtod_l, strtof_l, dladdr
+ *                          no system module exports them; the locale is "C"
  *   popen, pclose, open_memstream
  *                          no system module exports them, nor fork, funopen
  *                          or fopencookie to build them on: they fail as
@@ -122,6 +124,19 @@ FILE *ps5_open_memstream(char **buffer, size_t *size);
 
 /* uname through sysctl; __xuname is what the SDK's utsname.h calls. */
 int ps5___xuname(int length, void *names);
+
+/* The C locale only (and "POSIX", and "" for a title's environment): numbers
+ * parse with '.' as the decimal point whatever the global locale is. The
+ * locale arguments are locale_t's. */
+void *ps5_newlocale(int category_mask, const char *name, void *base);
+void ps5_freelocale(void *locale);
+double ps5_strtod_l(const char *s, char **end, void *locale);
+float ps5_strtof_l(const char *s, char **end, void *locale);
+
+/* An address's object and symbol: a title's executable carries no table to
+ * answer from, so this reports nothing, as dladdr does for an unknown address.
+ * info is a Dl_info. */
+int ps5_dladdr(const void *address, void *info);
 
 /* What the SDK's assert.h and fortified string.h call. */
 void ps5___assert(const char *function, const char *file, int line, const char *expression)

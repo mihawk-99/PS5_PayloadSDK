@@ -186,3 +186,13 @@ ps5___memset_chk(void *destination, int value, size_t length, size_t destination
    }
    return memset(destination, value, length);
 }
+
+/* ------------------------------------------------------------------- dladdr */
+
+int
+ps5_dladdr(const void *address, void *info)
+{
+   (void)address;
+   (void)info;
+   return 0;
+}

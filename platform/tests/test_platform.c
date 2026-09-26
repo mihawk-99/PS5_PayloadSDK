@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -609,6 +610,17 @@ test_posix(void)
    char memory[8];
    check(ps5___memset_chk(memory, 7, sizeof(memory), sizeof(memory)) == memory && memory[7] == 7,
          "__memset_chk sets a fitting range");
+
+   void *const c_locale = ps5_newlocale(LC_ALL_MASK, "C", NULL);
+   check(c_locale != NULL && ps5_newlocale(LC_ALL_MASK, "de_DE", NULL) == NULL,
+         "newlocale gives the C locale only");
+   char *number_end = NULL;
+   const char *number = "3.25e1x";
+   check(ps5_strtod_l(number, &number_end, c_locale) == 32.5 && number_end == number + 6,
+         "strtod_l parses with '.'");
+   check(ps5_strtof_l("0.5", NULL, c_locale) == 0.5f, "strtof_l parses with '.'");
+   ps5_freelocale(c_locale);
+   check(ps5_dladdr((const void *)test_posix, NULL) == 0, "dladdr reports nothing");
 
    struct ps5_regex re;
    memset(&re, 0, sizeof(re));
