@@ -66,6 +66,9 @@ unzip -q "$archive" -d "$staging"
     echo "the release archive has no ps5-payload-sdk/bin/prospero-lld" >&2
     exit 2
 }
+# The release archive carries target/include_common as an empty directory,
+# where an install makes a link to user/homebrew/include; the install makes it.
+rmdir -- "$staging/ps5-payload-sdk/target/include_common"
 make -s -C "$tree/include" install DESTDIR="$staging/ps5-payload-sdk"
 make -s -C "$tree/platform" clean
 make -s -C "$tree/platform" install DESTDIR="$staging/ps5-payload-sdk"
