@@ -584,6 +584,35 @@ report_stack(void *out)
    return NULL;
 }
 
+static int destructor_order[4];
+static int destructor_count;
+
+static void
+record_destructor(void *object)
+{
+   destructor_order[destructor_count++] = *(int *)object;
+}
+
+static void *
+register_destructors(void *unused)
+{
+   (void)unused;
+   static int first = 1, second = 2;
+   ps5___cxa_thread_atexit_impl(record_destructor, &first, NULL);
+   ps5___cxa_thread_atexit_impl(record_destructor, &second, NULL);
+   return NULL;
+}
+
+/* src/cxa.c: a thread's thread_local destructors, last registered first. */
+static void
+test_thread_destructors(void)
+{
+   pthread_t thread;
+   check(pthread_create(&thread, NULL, register_destructors, NULL) == 0 && pthread_join(thread, NULL) == 0 &&
+            destructor_count == 2 && destructor_order[0] == 2 && destructor_order[1] == 1,
+         "thread_local destructors run at thread exit, last first");
+}
+
 /* src/threads.c, linked with --wrap=pthread_create as consumers link it. */
 static void
 test_thread_stacks(void)
@@ -770,6 +799,9 @@ main(void)
    printf("%s\n", "test_posix");
    fflush(stdout);
    test_posix();
+   printf("%s\n", "test_thread_destructors");
+   fflush(stdout);
+   test_thread_destructors();
    printf("%s\n", "test_thread_stacks");
    fflush(stdout);
    test_thread_stacks();

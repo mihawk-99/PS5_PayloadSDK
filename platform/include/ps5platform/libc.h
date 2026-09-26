@@ -181,6 +181,10 @@ int ps5_catclose(void *catalogue);
 int ps5_backtrace(void **frames, int size);
 void ps5_backtrace_symbols_fd(void *const *frames, int count, int fd);
 
+/* libc++abi's hook for C++ thread_local destructors: run, last registered
+ * first, when the thread exits, or at exit() for the thread calling it. */
+int ps5___cxa_thread_atexit_impl(void (*destructor)(void *), void *object, void *dso);
+
 /* An address's object and symbol: a title's executable carries no table to
  * answer from, so this reports nothing, as dladdr does for an unknown address.
  * info is a Dl_info. */
