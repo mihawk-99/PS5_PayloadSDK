@@ -83,8 +83,21 @@ ps5_klog_capture_stderr(const char *prefix)
    }
    pthread_detach(thread);
    fflush(stderr);
-   dup2(ends[1], STDERR_FILENO);
-   close(ends[1]);
+   /* A title may not dup2 (the console refuses it with EPERM), so the stream
+    * stderr moves to the pipe instead of descriptor 2; everything written
+    * through stderr (fprintf, perror, assert) goes there. */
+   if (dup2(ends[1], STDERR_FILENO) == STDERR_FILENO) {
+      close(ends[1]);
+   } else {
+      FILE *const stream = fdopen(ends[1], "w");
+      if (!stream) {
+         close(ends[1]);
+         pthread_mutex_unlock(&klog_lock);
+         return -1;
+      }
+      setvbuf(stream, NULL, _IOLBF, 0);
+      stderr = stream;
+   }
    klog_started = 1;
    pthread_mutex_unlock(&klog_lock);
    return 0;
