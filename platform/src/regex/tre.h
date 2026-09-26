@@ -33,6 +33,25 @@
 #include <wchar.h>
 #include <wctype.h>
 
+/* The SDK's FreeBSD <wctype.h> makes these macros over its locale internals
+ * (___runetype, ___tolower, __getCurrentRuneLocale), which no system module
+ * exports; the functions themselves are exported, so the engine calls them. */
+#undef iswalnum
+#undef iswalpha
+#undef iswblank
+#undef iswcntrl
+#undef iswctype
+#undef iswdigit
+#undef iswgraph
+#undef iswlower
+#undef iswprint
+#undef iswpunct
+#undef iswspace
+#undef iswupper
+#undef iswxdigit
+#undef towlower
+#undef towupper
+
 #undef  TRE_MBSTATE
 
 /* musl marks its internal functions hidden. */
