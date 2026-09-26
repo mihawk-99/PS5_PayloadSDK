@@ -5,7 +5,9 @@ does not have: one place for what every PS5 homebrew project of mine needs from
 the console. It holds the kernel functions we call, declared once. It holds the
 libc functions the console lacks or refuses. It gives executable code a home in
 direct memory, and it provides shared-memory objects with several views on
-direct memory, with virtual-range reservations. The machine context, as the
+direct memory, with virtual-range reservations. And it gives a title's
+allocations a heap in direct memory (`ps5platform/heap.h`), since libc's own
+private heap runs out long before the title does. The machine context, as the
 console lays it out, is corrected in the SDK's own `sys/_ucontext.h`
 (`include/freebsd`), so `uc->uc_mcontext.mc_rip` is the faulting instruction.
 
@@ -32,6 +34,7 @@ compiler is not byte-identical, and the fork changes none of them.
 - `src/`: the library, including the capability probe (`src/probe.c`).
   `src/regex/` is musl 1.2.5's regular-expression engine (TRE), under the MIT
   licence in `src/regex/COPYRIGHT.musl`; `src/regex.c` adapts it to the SDK's
-  FreeBSD `<regex.h>`.
+  FreeBSD `<regex.h>`. `src/dlmalloc/` is dlmalloc 2.8.6 (MIT, `SOURCE`), the
+  allocator under the title heap (`src/heap.c`).
 - `tests/`: the host unit tests and the host model of the console's kernel.
 - `docs/PROBE.md`: what the console measured, with `evidence/`.

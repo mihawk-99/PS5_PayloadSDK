@@ -40,10 +40,16 @@ REGEX_OBJS := $(REGEX_SRCS:src/regex/%.c=build/ps5/regex/%.o)
 REGEX_HEADERS := $(wildcard src/regex/*.h)
 REGEX_CFLAGS := $(filter-out -Wall -Wextra -Werror,$(CFLAGS)) -w
 
+# dlmalloc (src/dlmalloc/malloc.c, MIT), configured by src/dlmalloc/mspace.c
+# and built as imported, like the regex engine.
+HEAP_OBJ := build/ps5/dlmalloc/mspace.o
+HEAP_HEADERS := src/dlmalloc/malloc.c
+
 HOST_CC ?= cc
 HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -Iinclude -Isrc -pthread
-HOST_SRCS := $(filter-out src/probe.c,$(SRCS)) tests/host_kernel.c tests/test_platform.c
+HOST_SRCS := $(filter-out src/probe.c,$(SRCS)) tests/host_kernel.c tests/host_libc.c tests/test_platform.c
 HOST_REGEX_OBJS := $(REGEX_SRCS:src/regex/%.c=build/host/regex/%.o)
+HOST_HEAP_OBJ := build/host/dlmalloc/mspace.o
 
 .PHONY: all clean install test
 
@@ -57,7 +63,11 @@ build/ps5/regex/%.o: src/regex/%.c $(REGEX_HEADERS)
 	@mkdir -p build/ps5/regex
 	$(CC) $(REGEX_CFLAGS) -c $< -o $@
 
-build/ps5/libps5platform.a: $(OBJS) $(REGEX_OBJS)
+build/ps5/dlmalloc/mspace.o: src/dlmalloc/mspace.c $(HEAP_HEADERS)
+	@mkdir -p build/ps5/dlmalloc
+	$(CC) $(REGEX_CFLAGS) -c $< -o $@
+
+build/ps5/libps5platform.a: $(OBJS) $(REGEX_OBJS) $(HEAP_OBJ)
 	rm -f $@
 	$(AR) -rsc $@ $^
 
@@ -65,9 +75,13 @@ build/host/regex/%.o: src/regex/%.c $(REGEX_HEADERS)
 	@mkdir -p build/host/regex
 	$(HOST_CC) -std=gnu11 -O1 -g -w -c $< -o $@
 
-build/host/test_platform: $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HEADERS) $(wildcard tests/*.h)
+build/host/dlmalloc/mspace.o: src/dlmalloc/mspace.c $(HEAP_HEADERS)
+	@mkdir -p build/host/dlmalloc
+	$(HOST_CC) -std=gnu11 -O1 -g -w -c $< -o $@
+
+build/host/test_platform: $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HOST_HEAP_OBJ) $(HEADERS) $(wildcard tests/*.h)
 	@mkdir -p build/host
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) -Wl,--wrap=pthread_create -o $@
+	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) $(HOST_REGEX_OBJS) $(HOST_HEAP_OBJ) -Wl,--wrap=pthread_create -o $@
 
 build/host/test_directory_records: src/directory.c tests/test_directory_records.c $(HEADERS)
 	@mkdir -p build/host

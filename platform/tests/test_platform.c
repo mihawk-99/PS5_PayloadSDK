@@ -11,6 +11,7 @@
 
 #include "host_kernel.h"
 #include "ps5platform/exec.h"
+#include "ps5platform/heap.h"
 #include "ps5platform/kernel.h"
 #include "ps5platform/libc.h"
 #include "ps5platform/platform.h"
@@ -758,6 +759,165 @@ test_posix(void)
    ps5_regfree(&re);
 }
 
+/* ------------------------------------------------------------ title heap */
+
+void *__wrap_malloc(size_t bytes);
+void *__wrap_calloc(size_t count, size_t bytes);
+void *__wrap_realloc(void *pointer, size_t bytes);
+void *__wrap_reallocf(void *pointer, size_t bytes);
+void *__wrap_reallocarray(void *pointer, size_t count, size_t bytes);
+void __wrap_free(void *pointer);
+int __wrap_posix_memalign(void **out, size_t alignment, size_t bytes);
+void *__wrap_aligned_alloc(size_t alignment, size_t bytes);
+size_t __wrap_malloc_usable_size(const void *pointer);
+ssize_t __wrap_getline(char **line, size_t *capacity, FILE *stream);
+
+static void *
+heap_worker(void *opaque)
+{
+   unsigned seed = (unsigned)(uintptr_t)opaque;
+   void *held[64] = {0};
+   size_t sizes[64] = {0};
+   bool intact = true;
+   for (unsigned i = 0; i < 20000; i++) {
+      const unsigned slot = (unsigned)rand_r(&seed) % 64;
+      if (held[slot]) {
+         const unsigned char *bytes = held[slot];
+         intact &= bytes[0] == (unsigned char)slot && bytes[sizes[slot] - 1] == (unsigned char)slot;
+         __wrap_free(held[slot]);
+         held[slot] = NULL;
+      } else {
+         sizes[slot] = 1 + (size_t)rand_r(&seed) % 70000;
+         held[slot] = __wrap_malloc(sizes[slot]);
+         intact &= held[slot] != NULL && ps5_heap_owns(held[slot]);
+         if (held[slot]) {
+            memset(held[slot], (int)slot, sizes[slot]);
+         }
+      }
+   }
+   for (unsigned slot = 0; slot < 64; slot++)
+      __wrap_free(held[slot]);
+   return intact ? opaque : NULL;
+}
+
+static void
+test_heap(void)
+{
+   /* Small blocks: the heap's, in its range, 32-byte aligned, and one
+    * segment of direct memory for all of them. */
+   const long long direct_before = host_direct_allocations();
+   char *small = __wrap_malloc(24);
+   struct ps5_heap_stats stats;
+   ps5_heap_stats(&stats);
+   check(small && ps5_heap_owns(small), "heap: a small block is the heap's");
+   check(stats.range_base >= 0x300000000ull && stats.range_bytes == PS5_HEAP_RANGE,
+         "heap: the whole range is reserved outside the GPU window");
+   check((uintptr_t)small % 32 == 0, "heap: blocks are 32-byte aligned");
+   check(stats.segments == 1 && host_direct_allocations() == direct_before + 1,
+         "heap: the first block maps one segment");
+   strcpy(small, "title heap");
+   char *grown = __wrap_realloc(small, 100000);
+   check(grown && ps5_heap_owns(grown) && strcmp(grown, "title heap") == 0,
+         "heap: realloc keeps the contents");
+   check(__wrap_malloc_usable_size(grown) >= 100000, "heap: usable size covers the request");
+   char *zero = __wrap_realloc(grown, 0);
+   check(zero != NULL && ps5_heap_owns(zero), "heap: realloc to zero bytes gives a minimum object");
+   __wrap_free(zero);
+   int *cleared = __wrap_calloc(1000, sizeof(int));
+   bool all_zero = cleared != NULL;
+   for (int i = 0; cleared && i < 1000; i++)
+      all_zero &= cleared[i] == 0;
+   check(all_zero && ps5_heap_owns(cleared), "heap: calloc clears");
+   __wrap_free(cleared);
+   check(__wrap_reallocarray(NULL, SIZE_MAX / 2, 4) == NULL && errno == ENOMEM,
+         "heap: reallocarray refuses an overflowing count");
+
+   /* Alignment. */
+   bool aligned = true;
+   for (size_t alignment = 8; alignment <= 0x10000; alignment *= 2) {
+      void *pointer = NULL;
+      aligned &= __wrap_posix_memalign(&pointer, alignment, 100) == 0 && pointer &&
+                 (uintptr_t)pointer % alignment == 0 && ps5_heap_owns(pointer);
+      __wrap_free(pointer);
+      void *c11 = __wrap_aligned_alloc(alignment, alignment * 2);
+      aligned &= c11 && (uintptr_t)c11 % alignment == 0;
+      __wrap_free(c11);
+   }
+   void *unaligned = NULL;
+   check(aligned, "heap: posix_memalign and aligned_alloc honour 8 B to 64 KiB");
+   check(__wrap_posix_memalign(&unaligned, 24, 100) == EINVAL, "heap: a non-power-of-two alignment is EINVAL");
+
+   /* A block past the mapping threshold has a segment of its own, returned
+    * with the block. */
+   ps5_heap_stats(&stats);
+   const unsigned segments = stats.segments;
+   const size_t mapped = stats.mapped_bytes;
+   unsigned char *large = __wrap_malloc((size_t)100 << 20);
+   check(large && ps5_heap_owns(large), "heap: a 100 MiB block is the heap's");
+   if (large) {
+      large[0] = 1;
+      large[((size_t)100 << 20) - 1] = 2;
+   }
+   ps5_heap_stats(&stats);
+   check(stats.segments == segments + 1 && stats.mapped_bytes >= mapped + ((size_t)100 << 20),
+         "heap: a large block maps its own segment");
+   __wrap_free(large);
+   ps5_heap_stats(&stats);
+   check(stats.segments == segments && stats.mapped_bytes == mapped,
+         "heap: freeing it returns the segment's direct memory");
+   check(stats.peak_bytes >= mapped + ((size_t)100 << 20), "heap: the peak remembers it");
+
+   /* libc's blocks stay libc's. */
+   char *foreign = strdup("libc's own");
+   check(foreign && !ps5_heap_owns(foreign), "heap: a libc block is not the heap's");
+   char *foreign_grown = __wrap_realloc(foreign, 4096);
+   check(foreign_grown && !ps5_heap_owns(foreign_grown) && strcmp(foreign_grown, "libc's own") == 0,
+         "heap: realloc keeps a libc block in libc");
+   check(__wrap_malloc_usable_size(foreign_grown) >= 4096, "heap: usable size asks libc for its block");
+   __wrap_free(foreign_grown);
+
+   /* When direct memory refuses, libc serves the request. */
+   ps5_heap_stats(&stats);
+   const unsigned long long fallbacks = stats.libc_fallbacks;
+   host_fail(HOST_CALL_ALLOCATE, -1);
+   void *refused = __wrap_malloc((size_t)64 << 20);
+   host_fail(HOST_CALL_NONE, 0);
+   ps5_heap_stats(&stats);
+   check(refused && !ps5_heap_owns(refused) && stats.libc_fallbacks == fallbacks + 1,
+         "heap: a refused segment falls back to libc");
+   __wrap_free(refused);
+   char *kept = __wrap_malloc(64);
+   check(kept && ps5_heap_owns(kept), "heap: the next request is the heap's again");
+   __wrap_free(kept);
+
+   /* getline grows a heap buffer with the heap. */
+   char text[] = "first line\nsecond, longer line that has to grow the buffer past its start\n";
+   FILE *stream = fmemopen(text, strlen(text), "r");
+   char *line = __wrap_malloc(4);
+   size_t capacity = 4;
+   const ssize_t first = __wrap_getline(&line, &capacity, stream);
+   check(first == 11 && strcmp(line, "first line\n") == 0 && ps5_heap_owns(line),
+         "heap: getline reads a line into a heap buffer");
+   const ssize_t second = __wrap_getline(&line, &capacity, stream);
+   check(second == (ssize_t)strlen(text) - 11 && line[second - 1] == '\n',
+         "heap: getline grows the buffer");
+   check(__wrap_getline(&line, &capacity, stream) == -1, "heap: getline ends at end of file");
+   fclose(stream);
+   __wrap_free(line);
+
+   /* Threads. */
+   pthread_t threads[8];
+   for (uintptr_t i = 0; i < 8; i++)
+      pthread_create(&threads[i], NULL, heap_worker, (void *)(i + 1));
+   bool threads_intact = true;
+   for (uintptr_t i = 0; i < 8; i++) {
+      void *result = NULL;
+      pthread_join(threads[i], &result);
+      threads_intact &= result == (void *)(i + 1);
+   }
+   check(threads_intact, "heap: eight threads allocating and freeing keep every block intact");
+}
+
 int
 main(void)
 {
@@ -811,6 +971,9 @@ main(void)
    printf("%s\n", "test_directories");
    fflush(stdout);
    test_directories();
+   printf("%s\n", "test_heap");
+   fflush(stdout);
+   test_heap();
    printf("ps5-platform host tests: %u of %u checks passed\n", checks - failures, checks);
    return failures != 0;
 }

@@ -16,7 +16,8 @@ enum {
    HOST_CALL_RESERVE,
 };
 
-/* The nth next call of that kind fails. */
+/* The nth next call of that kind fails; with nth -1, every call fails until
+ * host_fail(HOST_CALL_NONE, 0). */
 void host_fail(int call, int nth);
 /* Direct-memory allocations outstanding. */
 long long host_direct_allocations(void);

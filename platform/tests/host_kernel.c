@@ -68,7 +68,9 @@ failing(int call)
 {
    bool fail = false;
    pthread_mutex_lock(&lock);
-   if (fail_call == call && --fail_countdown == 0) {
+   if (fail_call == call && fail_countdown < 0) {
+      fail = true;
+   } else if (fail_call == call && --fail_countdown == 0) {
       fail = true;
       fail_call = HOST_CALL_NONE;
    }
