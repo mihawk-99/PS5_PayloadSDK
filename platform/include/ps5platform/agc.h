@@ -44,6 +44,13 @@ int32_t sceAgcDriverSubmitDcb(struct ps5_agc_submit_description *description);
  * console started each submission up to a refresh late (PS5_Vulkan R68). */
 int32_t sceAgcSuspendPoint(void);
 
+/* The tessellation factor ring a title's submissions use: AGC programs the
+ * ring's registers itself, so a title's own writes to them do not take. With
+ * no ring set, tessellation reads an unmapped address and faults the GPU
+ * (PS5_Vulkan, the RADV run log, 2026-09-26). */
+int32_t sceAgcDriverSetTFRing(uintptr_t address, uint32_t size);
+int32_t sceAgcDriverGetTFRing(uintptr_t *address, uint32_t *size);
+
 /* The wait-until-safe packet for a VideoOut buffer, written at *up. */
 uint32_t sceAgcDriverGetWaitRenderingPacketSizeInDwords(void);
 uint32_t sceAgcDriverWaitUntilSafeForRendering(uint32_t **up, uint32_t words, uint32_t reserved,
