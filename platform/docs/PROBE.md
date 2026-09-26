@@ -136,3 +136,26 @@ the slow path: slower than any `write()`, and slower still with a larger
 buffer, the opposite of FreeBSD's `fwrite()`, which writes large data directly.
 A file written whole and large belongs on the descriptor, in chunks of a
 megabyte or more; stdio suits small writes, which it gathers.
+
+## Threads
+
+`ps5_platform_probe_threads` (src/probe_threads.c) reads back, with
+`pthread_attr_get_np()` from inside each thread, the stack a thread actually
+runs on (evidence/probe-2026-09-26-threads, run from the RetroArch title's main
+thread):
+
+| Thread | Stack |
+|---|---|
+| a fresh attribute object's `pthread_attr_getstacksize()` | 64 KiB |
+| created with no attributes | 64 KiB |
+| the process's main thread | 2 MiB |
+| created asking for 2 MiB | 2 MiB |
+
+The default is a sixteenth of what a FreeBSD desktop gives, and every thread a
+library starts with `pthread_create(..., NULL, ...)` gets it. A frame larger
+than 64 KiB on such a thread writes below its stack: the RetroArch title's
+threaded video driver faulted that way in a 66 KB frame of RetroArch's own
+Vulkan instance setup, one page below the thread's stack (its PHASE_LOG,
+2026-09-26). A thread that runs code it did not write -- a frontend's, an
+emulator core's -- should ask for its stack; the title gives RetroArch's own
+threads and the cores' 2 MiB.

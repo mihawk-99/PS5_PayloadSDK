@@ -1,0 +1,8 @@
+platform-probe: threads begin
+platform-probe: threads default attribute stacksize=65536 bytes (64 KiB) result=0
+platform-probe: threads calling thread stack=2097152 bytes (2048 KiB) base=(elided) in_use=1976
+platform-probe: threads no-attribute thread stack=65536 bytes (64 KiB) base=(elided) in_use=104
+platform-probe: threads check PASS a thread created with no attributes reports its stack
+platform-probe: threads 2 MiB thread stack=2097152 bytes (2048 KiB) base=(elided) in_use=104
+platform-probe: threads check PASS a thread asking for 2097152 bytes runs on at least that
+platform-probe: threads end failures=0
