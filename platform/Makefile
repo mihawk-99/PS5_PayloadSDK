@@ -53,8 +53,14 @@ build/host/test_platform: $(HOST_SRCS) $(HEADERS) $(wildcard tests/*.h)
 	@mkdir -p build/host
 	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) -o $@
 
-test: build/host/test_platform
+build/host/test_directory_records: src/directory.c tests/test_directory_records.c $(HEADERS)
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) src/directory.c tests/test_directory_records.c \
+		-Wl,--wrap=open -Wl,--wrap=close -o $@
+
+test: build/host/test_platform build/host/test_directory_records
 	build/host/test_platform
+	build/host/test_directory_records
 
 clean:
 	rm -rf build
