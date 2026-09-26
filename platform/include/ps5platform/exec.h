@@ -65,6 +65,17 @@ void ps5_exec_free(struct ps5_exec_region *region);
 /* The regions live now, and their bytes. */
 void ps5_exec_live(uint64_t *regions, uint64_t *bytes);
 
+/* The form a JIT's own allocator has -- a size in, a pointer out, the pointer
+ * back to free -- for the cores' AllocateExecutableMemory and the like. The
+ * region is read, write and execute, within +/-2 GiB of the anchor when one is
+ * given (the core's own code, so calls between the two use 32-bit
+ * displacements), and anywhere outside the GPU window otherwise. The layer
+ * keeps the region, so the caller holds only its address. NULL on failure. */
+void *ps5_exec_allocate(size_t bytes, uintptr_t anchor);
+/* Frees what ps5_exec_allocate returned. 0, or PS5_EXEC_BAD_REQUEST for an
+ * address it did not return. */
+int ps5_exec_release(void *base);
+
 #ifdef __cplusplus
 }
 #endif

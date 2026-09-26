@@ -140,6 +140,41 @@ test_exec_near(void)
          "near: 3 GiB cannot be near anything, and nothing is left");
 }
 
+/* The pointer-only form the cores' allocators use: Dolphin's near and far
+ * caches, 128 and 64 MiB, near the core's code and within a 32-bit jump of
+ * each other; freed by address; an unknown address refused. */
+static void
+test_exec_pointer(void)
+{
+   const uintptr_t anchor = (uintptr_t)(void *)&test_exec_pointer;
+   uint8_t *const near = ps5_exec_allocate((size_t)128 << 20, anchor);
+   uint8_t *const far = ps5_exec_allocate((size_t)64 << 20, anchor);
+   check(near && far, "pointer: 128 and 64 MiB near the anchor");
+   const uintptr_t low = (uintptr_t)(near < far ? near : far);
+   const uintptr_t high = near < far ? (uintptr_t)far + ((size_t)64 << 20)
+                                     : (uintptr_t)near + ((size_t)128 << 20);
+   check(near && far && high - low < 0x80000000ull,
+         "pointer: the two lie within one 32-bit displacement of each other");
+   check(near && outside_window(near, (size_t)128 << 20) && far &&
+            outside_window(far, (size_t)64 << 20),
+         "pointer: outside the GPU window");
+   if (near) {
+      write_return(near + 4096, 9);
+      check(call(near + 4096) == 9, "pointer: code runs, read-write-execute");
+   }
+   uint64_t regions = 0;
+   ps5_exec_live(&regions, NULL);
+   check(regions == 2, "pointer: two regions live");
+   check(ps5_exec_release(near + 4096) == PS5_EXEC_BAD_REQUEST,
+         "pointer: an address inside a region is not one it returned");
+   check(ps5_exec_release(near) == 0 && ps5_exec_release(far) == 0 && nothing_live(),
+         "pointer: both freed by address, nothing live");
+   check(ps5_exec_release(near) == PS5_EXEC_BAD_REQUEST, "pointer: freed twice is refused");
+   uint8_t *const anywhere = ps5_exec_allocate(4096, 0);
+   check(anywhere && outside_window(anywhere, 0x10000), "pointer: with no anchor, anywhere");
+   check(ps5_exec_release(anywhere) == 0 && nothing_live(), "pointer: and freed");
+}
+
 static void
 test_exec_fixed(void)
 {
@@ -447,6 +482,7 @@ main(void)
    printf("%s\n", "test_exec_near");
    fflush(stdout);
    test_exec_near();
+   test_exec_pointer();
    printf("%s\n", "test_exec_fixed");
    fflush(stdout);
    test_exec_fixed();

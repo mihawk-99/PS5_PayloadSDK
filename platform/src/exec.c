@@ -13,6 +13,7 @@
 #include "placement.h"
 #include "ps5platform/kernel.h"
 
+#include <pthread.h>
 #include <stdatomic.h>
 #include <string.h>
 
@@ -148,4 +149,51 @@ ps5_exec_live(uint64_t *regions, uint64_t *bytes)
       *regions = atomic_load(&live_regions);
    if (bytes)
       *bytes = atomic_load(&live_bytes);
+}
+
+/* ---- the pointer-only form -------------------------------------------------- */
+
+/* The regions ps5_exec_allocate handed out: a JIT holds a few (Dolphin's near
+ * and far caches and its trampolines, LRPS2's recompilers' areas). */
+#define KEPT_REGIONS 128
+static struct ps5_exec_region kept[KEPT_REGIONS];
+static pthread_mutex_t kept_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void *
+ps5_exec_allocate(size_t bytes, uintptr_t anchor)
+{
+   pthread_mutex_lock(&kept_lock);
+   struct ps5_exec_region *slot = NULL;
+   for (unsigned i = 0; i < KEPT_REGIONS && !slot; i++)
+      if (kept[i].bytes == 0)
+         slot = &kept[i];
+   void *base = NULL;
+   if (slot) {
+      const struct ps5_exec_request request = {
+         .bytes = bytes,
+         .anchor = anchor,
+         .flags = anchor != 0 ? PS5_EXEC_NEAR : 0,
+      };
+      if (ps5_exec_alloc(&request, slot) == 0)
+         base = slot->base;
+   }
+   pthread_mutex_unlock(&kept_lock);
+   return base;
+}
+
+int
+ps5_exec_release(void *base)
+{
+   if (!base)
+      return PS5_EXEC_BAD_REQUEST;
+   pthread_mutex_lock(&kept_lock);
+   int result = PS5_EXEC_BAD_REQUEST;
+   for (unsigned i = 0; i < KEPT_REGIONS; i++)
+      if (kept[i].bytes != 0 && kept[i].base == base) {
+         ps5_exec_free(&kept[i]);
+         result = 0;
+         break;
+      }
+   pthread_mutex_unlock(&kept_lock);
+   return result;
 }
