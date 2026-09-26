@@ -50,6 +50,12 @@ int32_t sceAgcSuspendPoint(void);
  * (PS5_Vulkan, the RADV run log, 2026-09-26). */
 int32_t sceAgcDriverSetTFRing(uintptr_t address, uint32_t size);
 int32_t sceAgcDriverGetTFRing(uintptr_t *address, uint32_t *size);
+/* VGT_HS_OFFCHIP_PARAM, which AGC programs the same way, as its two fields:
+ * the granularity (kept to 2 bits) and the buffering (the register's
+ * count - 1, kept to 9 bits: 1023 reads back as 511). A title starts with
+ * both 0 (measured by the RADV smoke title). */
+int32_t sceAgcDriverSetHsOffchipParam(uint32_t granularity, uint32_t buffering);
+int32_t sceAgcDriverGetHsOffchipParam(uint16_t *granularity, uint16_t *buffering);
 
 /* The wait-until-safe packet for a VideoOut buffer, written at *up. */
 uint32_t sceAgcDriverGetWaitRenderingPacketSizeInDwords(void);
