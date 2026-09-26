@@ -23,7 +23,8 @@
 extern "C" {
 #endif
 
-/* Placement: one of these, or none for anywhere outside the GPU window. */
+/* Placement: one of these (or PS5_EXEC_AT, below), or none for anywhere
+ * outside the GPU window. */
 #define PS5_EXEC_NEAR 0x1u  /* within +/-2 GiB of request.anchor */
 #define PS5_EXEC_FIXED 0x2u /* exactly at request.address */
 /* A separate read-write view of the same memory: code is written through
@@ -32,10 +33,15 @@ extern "C" {
 /* Start read-write, not executable: the caller toggles with ps5_exec_protect
  * (write-xor-execute callers). */
 #define PS5_EXEC_TOGGLED 0x8u
+/* Exactly at request.address, and only if that range is free: nothing already
+ * mapped there is replaced, unlike PS5_EXEC_FIXED. For a caller that tries
+ * candidate addresses in turn (LRPS2's code area, placed beside its main
+ * memory near the core's code); PS5_EXEC_NO_PLACE when the range is taken. */
+#define PS5_EXEC_AT 0x10u
 
 struct ps5_exec_request {
    size_t bytes;
-   uintptr_t address; /* PS5_EXEC_FIXED: the address; otherwise a hint, or 0 */
+   uintptr_t address; /* PS5_EXEC_FIXED or _AT: the address; otherwise a hint, or 0 */
    uintptr_t anchor;  /* PS5_EXEC_NEAR: the code that must reach this region */
    unsigned flags;
 };

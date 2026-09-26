@@ -41,6 +41,29 @@ place(const struct ps5_exec_request *request, int64_t start, size_t bytes, void 
       *base = at;
       return 0;
    }
+   if (request->flags & PS5_EXEC_AT) {
+      /* A reservation made where it is asked for only if the range is free:
+       * the kernel moves a hint it cannot place, and a moved one is refused. */
+      void *reserved = (void *)request->address;
+      int32_t result = sceKernelReserveVirtualRange(&reserved, bytes, 0, PS5P_DIRECT_UNIT);
+      if (result != 0)
+         return result;
+      if ((uintptr_t)reserved != request->address) {
+         sceKernelMunmap(reserved, bytes);
+         return PS5_EXEC_NO_PLACE;
+      }
+      void *at = reserved;
+      result =
+         sceKernelMapDirectMemory(&at, bytes, PROT_RW, PS5_KERNEL_MAP_FIXED, start, PS5P_DIRECT_UNIT);
+      if (result != 0 || at != reserved) {
+         if (result == 0)
+            sceKernelMunmap(at, bytes);
+         sceKernelMunmap(reserved, bytes);
+         return result != 0 ? result : PS5_EXEC_NO_PLACE;
+      }
+      *base = at;
+      return 0;
+   }
    if (request->flags & PS5_EXEC_NEAR) {
       void *reserved = NULL;
       const int result =
@@ -67,13 +90,17 @@ ps5_exec_alloc(const struct ps5_exec_request *request, struct ps5_exec_region *r
 {
    if (region)
       memset(region, 0, sizeof(*region));
-   const unsigned placement = PS5_EXEC_NEAR | PS5_EXEC_FIXED;
-   if (!request || !region || request->bytes == 0 ||
-       (request->flags & placement) == placement ||
+   const unsigned placement = request ? request->flags & (PS5_EXEC_NEAR | PS5_EXEC_FIXED | PS5_EXEC_AT)
+                                      : 0;
+   const bool exact = placement & (PS5_EXEC_FIXED | PS5_EXEC_AT);
+   if (!request || !region || request->bytes == 0 || (placement & (placement - 1)) != 0 ||
        ((request->flags & PS5_EXEC_DUAL_VIEW) && (request->flags & PS5_EXEC_TOGGLED)) ||
-       ((request->flags & PS5_EXEC_FIXED) && request->address % PS5P_DIRECT_UNIT != 0))
+       (exact && (request->address == 0 || request->address % PS5P_DIRECT_UNIT != 0)))
       return PS5_EXEC_BAD_REQUEST;
    const size_t bytes = ps5p_round_up(request->bytes, PS5P_DIRECT_UNIT);
+   /* An exact address in the GPU window is never one to give out. */
+   if (exact && !ps5p_outside_gpu_window(request->address, bytes))
+      return PS5_EXEC_NO_PLACE;
    int64_t start = -1;
    int32_t result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes,
                                                   PS5P_DIRECT_UNIT, PS5_KERNEL_DIRECT_TYPE_CPU, &start);

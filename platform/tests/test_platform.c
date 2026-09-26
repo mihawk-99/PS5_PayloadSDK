@@ -195,6 +195,37 @@ test_exec_fixed(void)
    check(nothing_live(), "fixed: nothing live");
 }
 
+/* PS5_EXEC_AT: exactly at the address when the range is free, and never over
+ * what is already there -- how LRPS2 tries candidate places for its code area. */
+static void
+test_exec_at(void)
+{
+   void *range = NULL;
+   check(ps5_vrange_reserve(8 << 20, NULL, 0x10000, &range) == 0, "at: a free place found");
+   ps5_vrange_release(range, 8 << 20);
+   struct ps5_exec_request request = {
+      .bytes = 4 << 20, .address = (uintptr_t)range, .flags = PS5_EXEC_AT};
+   struct ps5_exec_region region;
+   check(ps5_exec_alloc(&request, &region) == 0 && region.base == range,
+         "at: mapped exactly there while the range is free");
+   write_return(region.base, 12);
+   struct ps5_exec_region second;
+   check(ps5_exec_alloc(&request, &second) == PS5_EXEC_NO_PLACE,
+         "at: the same address again, taken, is refused");
+   check(call(region.base) == 12, "at: and what was there still runs, not replaced");
+   ps5_exec_free(&region);
+   request.address = 0;
+   check(ps5_exec_alloc(&request, &second) == PS5_EXEC_BAD_REQUEST, "at: no address is refused");
+   request.address = 0x200010000ull;
+   check(ps5_exec_alloc(&request, &second) == PS5_EXEC_NO_PLACE,
+         "at: an address in the GPU window is never given out");
+   request.address = (uintptr_t)range;
+   request.flags = PS5_EXEC_AT | PS5_EXEC_NEAR;
+   check(ps5_exec_alloc(&request, &second) == PS5_EXEC_BAD_REQUEST,
+         "at: with another placement is refused");
+   check(nothing_live(), "at: nothing live");
+}
+
 static void
 test_exec_dual(void)
 {
@@ -483,6 +514,7 @@ main(void)
    fflush(stdout);
    test_exec_near();
    test_exec_pointer();
+   test_exec_at();
    printf("%s\n", "test_exec_fixed");
    fflush(stdout);
    test_exec_fixed();
