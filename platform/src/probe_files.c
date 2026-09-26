@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -149,11 +150,15 @@ ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *direct
    /* A file of this name is only ever the probe's own, left by a run that
     * stopped before its unlink. */
    unlink(path);
-   uint64_t *const buffer = aligned_alloc(4096, FILE_PROBE_CHUNK_MAX);
-   if (buffer == NULL) {
-      file_say(&p, "no memory for a %u byte buffer", FILE_PROBE_CHUNK_MAX);
+   /* The buffer is mapped, not allocated: the console's libc heap refused
+    * aligned_alloc of 16 MiB in a title with 400 MiB of flexible memory free. */
+   void *const mapped = mmap(NULL, FILE_PROBE_CHUNK_MAX, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANON, -1, 0);
+   if (mapped == MAP_FAILED) {
+      file_say(&p, "no memory for a %u byte buffer, errno=%d", FILE_PROBE_CHUNK_MAX, errno);
       return 1;
    }
+   uint64_t *const buffer = mapped;
    file_say(&p, "begin directory=%s bytes=%u", directory, FILE_PROBE_BYTES);
    static const size_t chunks[] = {100u * 1024u, 1024u * 1024u, FILE_PROBE_CHUNK_MAX};
    for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++) {
@@ -166,7 +171,7 @@ ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *direct
    /* Informational: a file system may refuse direct I/O, which is an answer. */
    (void)file_pass(&p, path, buffer, FILE_PROBE_CHUNK_MAX, O_DIRECT, "direct");
 #endif
-   free(buffer);
+   munmap(mapped, FILE_PROBE_CHUNK_MAX);
    file_say(&p, "end failures=%d", p.failures);
    return p.failures;
 }
