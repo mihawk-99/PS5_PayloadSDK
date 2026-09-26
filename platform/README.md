@@ -1,14 +1,34 @@
-# PS5 Platform
+# The PS5 platform layer
 
-One place for what every PS5 homebrew project of mine needs from the console
-and the payload SDK does not give it: the kernel functions we call, declared
-once; the machine context as the console lays it out; the libc functions the
-console lacks or refuses; executable code in direct memory; and shared-memory
-objects with several views, on direct memory, with virtual-range reservations.
+This directory is the part of my fork of the payload SDK that the upstream SDK
+does not have: one place for what every PS5 homebrew project of mine needs from
+the console. It holds the kernel functions we call, declared once. It holds the
+libc functions the console lacks or refuses. It gives executable code a home in
+direct memory, and it provides shared-memory objects with several views on
+direct memory, with virtual-range reservations. The machine context, as the
+console lays it out, is corrected in the SDK's own `sys/_ucontext.h`
+(`include/freebsd`), so `uc->uc_mcontext.mc_rip` is the faulting instruction.
 
-It is consumed by PS5_RetroArch (and, through the title, its cores),
-PS5_Vulkan, PS5_vkQuake and the templates, each of which pins a revision of
-this repository and applies it in its own setup.
+`make` builds `libps5platform.a`; `make install` puts it in `target/lib` and
+its headers in `target/include/ps5platform`, as part of the SDK's own install.
+`make test` runs the host unit tests.
 
-- docs/PROBE.md: what the console measured, with evidence/.
-- src/probe.c: the capability probe that measured it.
+## How projects consume it
+
+PS5_RetroArch (and, through the title, its cores), PS5_Vulkan, PS5_vkQuake and
+the templates each pin one revision of this fork. Their dependency setup
+exports that revision with `git archive` and runs `platform/tools/setup-sdk.sh`
+from the export. The script downloads the upstream v0.42 release, the one this
+fork is based on, and checks it against its digest. It installs this revision's
+headers and platform layer over the release, then records the revision in the
+SDK directory's `.ps5-sdk-revision`.
+
+The release's binaries (crt, libc, the stubs, libc++ and the host tools) are
+kept as released rather than rebuilt here. Those are the binaries every
+project has been validated with on the console. A rebuild with another
+compiler is not byte-identical, and the fork changes none of them.
+
+- `include/ps5platform/`: the headers.
+- `src/`: the library, including the capability probe (`src/probe.c`).
+- `tests/`: the host unit tests and the host model of the console's kernel.
+- `docs/PROBE.md`: what the console measured, with `evidence/`.

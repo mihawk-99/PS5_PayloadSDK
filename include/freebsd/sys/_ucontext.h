@@ -41,6 +41,13 @@ typedef struct __ucontext {
 	 * note: the union is not defined, though.
 	 */
 	__sigset_t	uc_sigmask;
+	/*
+	 * PS5: the console's context has 48 bytes here that FreeBSD's does
+	 * not, so every register lies six 64-bit words later than FreeBSD's
+	 * layout places it. Measured by the platform probe with every general
+	 * register loaded with a marker (platform/docs/PROBE.md).
+	 */
+	int		__ps5_reserved[12];
 	mcontext_t	uc_mcontext;
 
 	struct __ucontext *uc_link;

@@ -816,6 +816,154 @@ probe_large(struct probe *p)
    say(p, "large direct_before=%zu direct_after=%zu", direct_before, available_direct(NULL));
 }
 
+/* ---- 10 GiB in use at once --------------------------------------------------- */
+
+/* Every 64-bit word gets a value derived from its offset and the seed, so a
+ * page mapped twice, dropped or aliased reads back wrong. */
+static uint64_t
+pattern(size_t offset, uint64_t seed)
+{
+   uint64_t z = (uint64_t)offset + seed;
+   z = (z ^ (z >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+   return z ^ (z >> 27);
+}
+
+static void
+fill(uint8_t *base, size_t bytes, size_t first_offset, uint64_t seed)
+{
+   uint64_t *const words = (uint64_t *)base;
+   for (size_t i = 0; i < bytes / 8; i++)
+      words[i] = pattern(first_offset + i * 8, seed);
+}
+
+static size_t
+count_wrong(const uint8_t *base, size_t bytes, size_t first_offset, uint64_t seed)
+{
+   const uint64_t *const words = (const uint64_t *)base;
+   size_t wrong = 0;
+   for (size_t i = 0; i < bytes / 8; i++)
+      wrong += words[i] != pattern(first_offset + i * 8, seed);
+   return wrong;
+}
+
+#define HUGE_BYTES (10 * GIB)
+#define HUGE_PIECES 10
+
+/* One 10 GiB allocation mapped read-write in one view. */
+static void
+probe_huge_single(struct probe *p)
+{
+   const size_t flexible_before = available_flexible();
+   const size_t direct_before = available_direct(NULL);
+   void *view = (void *)(VIEW_HINT + 8 * GIB);
+   int64_t start = -1;
+   const int32_t reserve = sceKernelReserveVirtualRange(&view, HUGE_BYTES, 0,
+                                                        PS5_KERNEL_DIRECT_ALIGNMENT);
+   const int32_t allocation = reserve == 0 ? direct_allocate(HUGE_BYTES, &start) : -1;
+   void *mapped = view;
+   const int32_t map = allocation == 0
+                          ? direct_map(&mapped, HUGE_BYTES, PROT_RW, PS5_KERNEL_MAP_FIXED, start)
+                          : -1;
+   size_t wrong = HUGE_BYTES / 8;
+   uint64_t fill_ns = 0, verify_ns = 0;
+   size_t direct_during = 0, flexible_during = 0;
+   if (map == 0) {
+      uint64_t t = sceKernelReadTsc();
+      fill(mapped, HUGE_BYTES, 0, 0x5a5a);
+      fill_ns = ns_since(p, t);
+      direct_during = available_direct(NULL);
+      flexible_during = available_flexible();
+      t = sceKernelReadTsc();
+      wrong = count_wrong(mapped, HUGE_BYTES, 0, 0x5a5a);
+      verify_ns = ns_since(p, t);
+   }
+   say(p,
+       "huge single bytes=%zu reserve=0x%08x allocation=0x%08x map=0x%08x view=%p "
+       "in_gpu_window=%u wrong_words=%zu fill_ns=%llu verify_ns=%llu direct_before=%zu "
+       "direct_during=%zu flexible_before=%zu flexible_during=%zu",
+       (size_t)HUGE_BYTES, (unsigned)reserve, (unsigned)allocation, (unsigned)map, mapped,
+       (unsigned)in_gpu_window((uintptr_t)mapped, HUGE_BYTES), wrong,
+       (unsigned long long)fill_ns, (unsigned long long)verify_ns, direct_before, direct_during,
+       flexible_before, flexible_during);
+   check(p, map == 0 && wrong == 0,
+         "one 10 GiB direct allocation is mapped and every word of it written and read back");
+   check(p, map == 0 && flexible_during == flexible_before &&
+               direct_before - direct_during >= HUGE_BYTES,
+         "the 10 GiB comes out of direct memory (the largest free block shrinks by at least "
+         "10 GiB) and flexible memory is unchanged");
+   if (reserve == 0)
+      sceKernelMunmap(view, HUGE_BYTES);
+   if (allocation == 0)
+      sceKernelReleaseDirectMemory(start, HUGE_BYTES);
+   const size_t direct_after = available_direct(NULL);
+   say(p, "huge single direct_after=%zu", direct_after);
+   check(p, direct_after == direct_before, "releasing the 10 GiB returns direct memory to baseline");
+}
+
+/* Ten 1 GiB allocations mapped side by side into one reserved 10 GiB range:
+ * the shape of a guest memory arena built from pieces. */
+static void
+probe_huge_pieces(struct probe *p)
+{
+   const size_t piece = HUGE_BYTES / HUGE_PIECES;
+   const size_t flexible_before = available_flexible();
+   const size_t direct_before = available_direct(NULL);
+   void *range = (void *)(VIEW_HINT + 8 * GIB);
+   const int32_t reserve = sceKernelReserveVirtualRange(&range, HUGE_BYTES, 0,
+                                                        PS5_KERNEL_DIRECT_ALIGNMENT);
+   int64_t starts[HUGE_PIECES];
+   unsigned allocated = 0, mapped = 0;
+   int32_t first_error = 0;
+   for (unsigned i = 0; reserve == 0 && i < HUGE_PIECES; i++) {
+      int32_t result = direct_allocate(piece, &starts[i]);
+      if (result == 0) {
+         allocated++;
+         void *at = (uint8_t *)range + i * piece;
+         result = direct_map(&at, piece, PROT_RW, PS5_KERNEL_MAP_FIXED, starts[i]);
+         if (result == 0 && at == (uint8_t *)range + i * piece)
+            mapped++;
+      }
+      if (result != 0) {
+         first_error = result;
+         break;
+      }
+   }
+   size_t wrong = HUGE_BYTES / 8;
+   uint64_t fill_ns = 0, verify_ns = 0;
+   size_t direct_during = 0, flexible_during = 0;
+   if (mapped == HUGE_PIECES) {
+      uint64_t t = sceKernelReadTsc();
+      fill(range, HUGE_BYTES, 0, 0xa5a5);
+      fill_ns = ns_since(p, t);
+      direct_during = available_direct(NULL);
+      flexible_during = available_flexible();
+      t = sceKernelReadTsc();
+      wrong = count_wrong(range, HUGE_BYTES, 0, 0xa5a5);
+      verify_ns = ns_since(p, t);
+   }
+   say(p,
+       "huge pieces pieces=%u piece_bytes=%zu reserve=0x%08x allocated=%u mapped=%u "
+       "first_error=0x%08x range=%p in_gpu_window=%u wrong_words=%zu fill_ns=%llu verify_ns=%llu "
+       "direct_before=%zu direct_during=%zu flexible_before=%zu flexible_during=%zu",
+       HUGE_PIECES, piece, (unsigned)reserve, allocated, mapped, (unsigned)first_error, range,
+       (unsigned)in_gpu_window((uintptr_t)range, HUGE_BYTES), wrong,
+       (unsigned long long)fill_ns, (unsigned long long)verify_ns, direct_before, direct_during,
+       flexible_before, flexible_during);
+   check(p, mapped == HUGE_PIECES && wrong == 0,
+         "ten 1 GiB allocations mapped side by side in one reserved range hold 10 GiB, every "
+         "word written and read back");
+   check(p, mapped == HUGE_PIECES && flexible_during == flexible_before,
+         "the ten pieces are not charged to flexible memory");
+   if (reserve == 0)
+      sceKernelMunmap(range, HUGE_BYTES);
+   for (unsigned i = 0; i < allocated; i++)
+      sceKernelReleaseDirectMemory(starts[i], piece);
+   const size_t direct_after = available_direct(NULL);
+   say(p, "huge pieces direct_after=%zu", direct_after);
+   check(p, direct_after == direct_before,
+         "releasing the ten pieces returns direct memory to baseline");
+}
+
 /* ---- the JIT interface ------------------------------------------------------ */
 
 static void
@@ -851,6 +999,10 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
    probe_reuse(&p);
    if (flags & PS5_PROBE_LARGE)
       probe_large(&p);
+   if (flags & PS5_PROBE_HUGE) {
+      probe_huge_single(&p);
+      probe_huge_pieces(&p);
+   }
    const size_t flexible_end = available_flexible();
    const size_t direct_end = available_direct(NULL);
    check(&p, flexible_end == flexible_start && direct_end == direct_start,

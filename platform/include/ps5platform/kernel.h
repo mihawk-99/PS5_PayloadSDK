@@ -6,7 +6,7 @@
  * The payload SDK links every one of these (its libkernel stubs name them) but
  * its headers declare none, so each project used to declare its own. Each
  * function here is exported by the console's libkernel_web, the libkernel this
- * title family imports (../PS5_RetroArch/docs/PLATFORM_FIRMWARE_ANALYSIS.md records the
+ * title family imports (PS5_RetroArch's docs/PLATFORM_FIRMWARE_ANALYSIS.md records the
  * comparison), and the behaviour the comments state is what our own console
  * probe measured (src/probe.c, evidence/), not what any other source says.
  *
