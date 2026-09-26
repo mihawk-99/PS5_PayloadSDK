@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Mihawk
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Check the two 10 GiB runs, built with this fork's machine-context header.
+"""Check the runs built with this fork's machine-context header.
 
 reserve-refused.txt: the first 10 GiB test, whose reservation was refused, kept
 because it established that behaviour. survey.txt: the survey of virtual space
-and the 10 GiB mapped and written at once.
+and the 10 GiB mapped and written at once. full.txt: the largest allocation
+mapped and written, and what is left while it is held.
 """
 import re
 from pathlib import Path
@@ -27,8 +28,8 @@ def first(run, prefix):
     return fields(next(l for l in run if l.startswith(prefix)))
 
 
-refused, survey = lines('reserve-refused.txt'), lines('survey.txt')
-for run in (refused, survey):
+refused, survey, full = lines('reserve-refused.txt'), lines('survey.txt'), lines('full.txt')
+for run in (refused, survey, full):
     assert first(run, 'identity sw_version')['sw_version_text'] == '12.090.001'
     # The header matches the console: uc_mcontext at word 8, every marker at
     # its FreeBSD mcontext field.
@@ -70,8 +71,26 @@ assert first(survey, 'huge single direct_after')['direct_after'] == single['dire
 pieces = first(survey, 'huge pieces pieces')
 assert pieces['mapped'] == '10' and pieces['wrong_words'] == '0' and pieces['in_gpu_window'] == '0'
 assert pieces['flexible_before'] == pieces['flexible_during']
+
+# The whole pool: all of the free direct memory is one allocatable block, the
+# largest allocation found (to 64 MiB) is mapped and every word checked, and
+# what is left while it is held is the part below the search step.
+baseline = first(full, 'full baseline')
+assert baseline['allocatable'] == baseline['largest_block'] == first(full, 'pool direct_size')['direct_available']
+held = first(full, 'full bytes')
+assert held['bytes'] == first(full, 'pool largest_allocation')['largest_allocation']
+assert int(held['bytes']) >= 11 * GIB + 3 * GIB // 4
+assert held['map'] == '0x00000000' and held['wrong_words'] == '0' and held['in_gpu_window'] == '0'
+assert held['flexible_before'] == held['flexible_during']
+left = first(full, 'full left')
+assert int(held['bytes']) + int(left['allocatable']) == int(baseline['allocatable'])
+assert int(left['allocatable']) < 64 << 20 and left['flexible'] == held['flexible_before']
+assert first(full, 'full direct_after')['direct_after'] == baseline['allocatable']
+assert not [l for l in full if l.startswith('check FAIL')]
 print('PASS: header matches the console (uc_mcontext at word 8, rip at 28); a 10 GiB '
       'reservation refused at 0x6_0000_0000; 16 GiB reserved at hints 0x10_0000_0000-'
       '0x80_0000_0000, nothing from 1 TiB; 10 GiB mapped, written and read back as one '
       'allocation (fill', int(single['fill_ns']) // 1000000, 'ms, verify',
-      int(single['verify_ns']) // 1000000, 'ms) and as ten, flexible memory unchanged')
+      int(single['verify_ns']) // 1000000, 'ms) and as ten, flexible memory unchanged; '
+      'the largest allocation,', held['bytes'], 'bytes, mapped and written with',
+      left['allocatable'], 'bytes of direct memory left')

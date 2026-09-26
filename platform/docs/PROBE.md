@@ -11,8 +11,9 @@ flexible-memory budget, its `libkernel_web` imports, the driver's GPU window
 and its core loader are the constraints the answers have to hold under.
 
 Evidence: evidence/probe-2026-09-25 (three runs built with the upstream SDK
-header) and evidence/probe-2026-09-25-huge (two runs built with this fork's
-header, the second the 10 GiB test); each directory's check.py asserts every
+header) and evidence/probe-2026-09-25-huge (three runs built with this fork's
+header: the refused 10 GiB reservation, the survey with 10 GiB mapped, and the
+whole pool); each directory's check.py asserts every
 number quoted here from its runs. Console: system software 12.09
 (`sceKernelGetSystemSwVersion` reports 12.090.001).
 
@@ -74,10 +75,18 @@ number quoted here from its runs. Console: system software 12.09
 - **10 GiB in ten pieces**: ten 1 GiB allocations mapped at once, each
   wherever the kernel placed it near the hint, all outside the GPU window,
   every word right, flexible memory unchanged.
+- **The whole pool**: all 11.94 GiB of free direct memory is one block. The
+  largest allocation the 64 MiB search finds, 11.875 GiB, was mapped at
+  0x10_0000_0000 and every word written (0.80 s) and read back (1.16 s) with
+  no error. While it was held, 62 MiB of direct memory could still be
+  allocated (the remainder below the search step) and flexible memory was
+  unchanged at 403 MiB.
 - Direct memory returned to its starting size after each.
 
 So the CPU side is not limited to 4 GiB: a title can hold the whole direct
-pool it is given. The 4 GiB limit that remains is the Vulkan driver's GPU
+pool it is given, about 11.9 GiB, beside its 403 MiB of flexible memory. The
+ceiling is the pool: 12 GiB, 66 MiB of which is already in use when the
+probe starts. The 4 GiB limit that remains is the Vulkan driver's GPU
 window, which is where GPU-visible memory has to live.
 
 ## Virtual space
