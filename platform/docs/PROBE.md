@@ -186,3 +186,10 @@ the GPU, keeping denormals, returned 2 (dEQP-VK.glsl.builtin.precision_double,
 subnormal cases). `ps5_fp_ieee()` (ps5platform/fp.h) sets the IEEE state a
 title's startup code asks for, and the platform's `pthread_create` starts each
 thread with its creator's MXCSR.
+
+The compiler has its own model of the same state. The PS5 target defaults to
+`-fdenormal-fp-math=preserve-sign`, and code built on it classified a denormal
+float as normal (`fpclassify` and `__builtin_fpclassify` both, read from the
+CTS title with the IEEE state set), so the CTS's OpFma checks never allowed a
+flushed denormal input. The SDK's compiler wrappers pass
+`-fdenormal-fp-math=ieee`, which is right under either state.

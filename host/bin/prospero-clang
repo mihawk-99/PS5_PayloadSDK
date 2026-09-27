@@ -66,6 +66,12 @@ fi
 # ensure clang knows where prospero-lld is at
 export PATH="${SCRIPT_DIR}:${PATH}"
 
+# The PS5 target defaults to -fdenormal-fp-math=preserve-sign, the model of
+# a title that keeps the console's flush-to-zero MXCSR; code built on it
+# classified a denormal float as normal even with IEEE state set
+# (platform/docs/PROBE.md). IEEE is correct under either state: it only drops
+# optimisations that assume flushing. A project's own flag, after this one,
+# still wins.
 exec -a "${SCRIPT_NAME}" "${SCRIPT_DIR}/clang" \
      --start-no-unused-arguments \
      -target x86_64-sie-ps5 \
@@ -75,6 +81,7 @@ exec -a "${SCRIPT_NAME}" "${SCRIPT_DIR}/clang" \
      -L "${PS5_PAYLOAD_SDK}/target/lib" \
      -L "${PS5_PAYLOAD_HBROOT}/lib" \
      -fno-stack-protector -fno-plt -femulated-tls \
+     -fdenormal-fp-math=ieee \
      $LIBS_C  \
      --end-no-unused-arguments \
      "$@" \
