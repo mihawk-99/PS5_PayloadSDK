@@ -24,6 +24,10 @@
  * routine has returned (or it called pthread_exit). Such threads are created
  * joinable, so the reaper can; for the caller they are detached as asked. A
  * few freed stacks are kept for the next threads.
+ *
+ * Every thread created through the wrap starts with its creator's MXCSR, as a
+ * Linux thread does, so a title that set the IEEE state (ps5platform/fp.h)
+ * keeps it in its threads.
  */
 #define _GNU_SOURCE 1
 /* pthread_attr_getstackaddr is deprecated, and the one call that says what
@@ -37,6 +41,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -61,6 +66,7 @@ struct thread_record {
    struct thread_stack stack;
    void *(*start)(void *);
    void *argument;
+   uint32_t mxcsr;
    bool detached;
    bool finished;
 };
@@ -214,12 +220,59 @@ key_create(void)
    pthread_key_create(&finish_key, thread_finished);
 }
 
+static uint32_t
+mxcsr_read(void)
+{
+   uint32_t mxcsr;
+   __asm__ volatile("stmxcsr %0" : "=m"(mxcsr));
+   return mxcsr;
+}
+
+static void
+mxcsr_write(uint32_t mxcsr)
+{
+   __asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
+}
+
 static void *
 thread_start(void *opaque)
 {
    struct thread_record *const record = opaque;
+   mxcsr_write(record->mxcsr);
    pthread_setspecific(finish_key, record);
    return record->start(record->argument);
+}
+
+/* A thread on a stack of its own (or libkernel's): only the creator's MXCSR
+ * travels with it. */
+struct plain_start {
+   void *(*start)(void *);
+   void *argument;
+   uint32_t mxcsr;
+};
+
+static void *
+plain_thread_start(void *opaque)
+{
+   const struct plain_start begin = *(const struct plain_start *)opaque;
+   free(opaque);
+   mxcsr_write(begin.mxcsr);
+   return begin.start(begin.argument);
+}
+
+static int
+create_plain(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *argument)
+{
+   struct plain_start *const begin = malloc(sizeof(*begin));
+   if (!begin)
+      return EAGAIN;
+   begin->start = start;
+   begin->argument = argument;
+   begin->mxcsr = mxcsr_read();
+   const int result = __real_pthread_create(thread, attributes, plain_thread_start, begin);
+   if (result != 0)
+      free(begin);
+   return result;
 }
 
 /* -------------------------------------------------------------- the wraps */
@@ -268,7 +321,7 @@ __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void 
    pthread_attr_t copy;
    bool detached;
    if (!stack_attributes(attributes, &copy, &detached))
-      return __real_pthread_create(thread, attributes, start, argument);
+      return create_plain(thread, attributes, start, argument);
    pthread_once(&key_once, key_create);
 
    struct thread_record *const record = calloc(1, sizeof(*record));
@@ -278,6 +331,7 @@ __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void 
    }
    record->start = start;
    record->argument = argument;
+   record->mxcsr = mxcsr_read();
    record->detached = detached;
 
    pthread_mutex_lock(&lock);
@@ -288,7 +342,7 @@ __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void 
       free(record);
       pthread_attr_setdetachstate(&copy, detached ? PTHREAD_CREATE_DETACHED : PTHREAD_CREATE_JOINABLE);
       pthread_attr_setstacksize(&copy, PS5_THREAD_STACK_BYTES);
-      const int result = __real_pthread_create(thread, &copy, start, argument);
+      const int result = create_plain(thread, &copy, start, argument);
       pthread_attr_destroy(&copy);
       return result;
    }

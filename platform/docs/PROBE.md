@@ -179,5 +179,10 @@ translating anything; it had spliced the empty point in place of '.', and
 through libc++'s `num_get` every `istream >> float` read 0.1 as 1e8.
 
 A process starts with denormals flushed, where every other x86-64 system starts
-at 0x1f80. Nothing seen so far depends on it, but code that relies on IEEE
-denormals on the CPU has to set MXCSR itself.
+at 0x1f80. Code written for those systems breaks on it: the Vulkan CTS computes
+the intervals it accepts for double-precision builtins on the CPU, and with a
+denormal quotient flushed it expected `mod(-2^-1022, 2)` to be -2^-1022, while
+the GPU, keeping denormals, returned 2 (dEQP-VK.glsl.builtin.precision_double,
+subnormal cases). `ps5_fp_ieee()` (ps5platform/fp.h) sets the IEEE state a
+title's startup code asks for, and the platform's `pthread_create` starts each
+thread with its creator's MXCSR.

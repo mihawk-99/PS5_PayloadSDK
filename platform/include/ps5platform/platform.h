@@ -8,6 +8,7 @@
 
 #include "ps5platform/context.h"
 #include "ps5platform/exec.h"
+#include "ps5platform/fp.h"
 #include "ps5platform/heap.h"
 #include "ps5platform/kernel.h"
 #include "ps5platform/klog.h"

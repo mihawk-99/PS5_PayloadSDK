@@ -14,6 +14,7 @@
 /* host_libc.c: localeconv() reports an empty decimal point, as the console's. */
 extern int host_empty_decimal_point;
 #include "ps5platform/exec.h"
+#include "ps5platform/fp.h"
 #include "ps5platform/heap.h"
 #include "ps5platform/klog.h"
 #include "ps5platform/kernel.h"
@@ -637,6 +638,55 @@ deep_stack(void *unused)
    return (void *)(uintptr_t)frame[4096];
 }
 
+static unsigned
+read_mxcsr(void)
+{
+   unsigned mxcsr;
+   __asm__ volatile("stmxcsr %0" : "=m"(mxcsr));
+   return mxcsr;
+}
+
+static void
+write_mxcsr(unsigned mxcsr)
+{
+   __asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
+}
+
+static void *
+report_mxcsr(void *out)
+{
+   *(unsigned *)out = read_mxcsr();
+   return NULL;
+}
+
+static void
+test_fp_environment(void)
+{
+   /* The console's start: flush-to-zero and denormals-are-zero. */
+   write_mxcsr(0x9fe0);
+   ps5_fp_ieee();
+   const unsigned ieee = read_mxcsr() & ~0x3fu; /* without the exception flags */
+   check(ieee == 0x1f80, "fp: ps5_fp_ieee sets MXCSR to 0x1f80");
+   volatile double tiny = 0x1p-1022;
+   check(tiny / 2 != 0.0, "fp: a denormal quotient is kept");
+
+   /* A creator with flush-to-zero set hands it to its threads, whichever way
+    * their stacks come. */
+   write_mxcsr(0x9fc0);
+   unsigned seen = 0;
+   pthread_t thread;
+   const bool plain = pthread_create(&thread, NULL, report_mxcsr, &seen) == 0 && pthread_join(thread, NULL) == 0;
+   check(plain && seen == 0x9fc0, "fp: a thread on the platform's stack starts with its creator's MXCSR");
+   pthread_attr_t large;
+   pthread_attr_init(&large);
+   pthread_attr_setstacksize(&large, (size_t)8 << 20);
+   seen = 0;
+   const bool own = pthread_create(&thread, &large, report_mxcsr, &seen) == 0 && pthread_join(thread, NULL) == 0;
+   pthread_attr_destroy(&large);
+   check(own && seen == 0x9fc0, "fp: a thread on a stack of its own starts with its creator's MXCSR");
+   ps5_fp_ieee();
+}
+
 static void
 test_thread_stacks(void)
 {
@@ -1050,6 +1100,9 @@ main(void)
    printf("%s\n", "test_thread_stacks");
    fflush(stdout);
    test_thread_stacks();
+   printf("%s\n", "test_fp_environment");
+   fflush(stdout);
+   test_fp_environment();
    printf("%s\n", "test_libc");
    fflush(stdout);
    test_libc();
