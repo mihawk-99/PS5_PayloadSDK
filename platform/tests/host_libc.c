@@ -10,6 +10,7 @@
 #define _GNU_SOURCE 1
 
 #include <malloc.h>
+#include <locale.h>
 #include <stdlib.h>
 
 void *__real_malloc(size_t bytes);
@@ -28,3 +29,21 @@ int __real_posix_memalign(void **out, size_t alignment, size_t bytes)
    return posix_memalign(out, alignment, bytes);
 }
 size_t __real_malloc_usable_size(const void *pointer) { return malloc_usable_size((void *)pointer); }
+
+/* localeconv() as the console's: its decimal point reads empty while strtod
+ * reads '.' (host_empty_decimal_point set), else the host's. */
+struct lconv *__real_localeconv(void);
+int host_empty_decimal_point;
+
+struct lconv *
+__wrap_localeconv(void)
+{
+   static struct lconv console;
+   struct lconv *const host = __real_localeconv();
+   if (!host_empty_decimal_point)
+      return host;
+   console = *host;
+   console.decimal_point = (char *)"";
+   console.thousands_sep = (char *)"";
+   return &console;
+}

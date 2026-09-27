@@ -10,6 +10,9 @@
 #define _GNU_SOURCE 1
 
 #include "host_kernel.h"
+
+/* host_libc.c: localeconv() reports an empty decimal point, as the console's. */
+extern int host_empty_decimal_point;
 #include "ps5platform/exec.h"
 #include "ps5platform/heap.h"
 #include "ps5platform/klog.h"
@@ -744,6 +747,12 @@ test_posix(void)
    check(ps5_strtod_l(number, &number_end, c_locale) == 32.5 && number_end == number + 6,
          "strtod_l parses with '.'");
    check(ps5_strtof_l("0.5", NULL, c_locale) == 0.5f, "strtof_l parses with '.'");
+   host_empty_decimal_point = 1;
+   number_end = NULL;
+   check(ps5_strtod_l(number, &number_end, c_locale) == 32.5 && number_end == number + 6 &&
+            ps5_strtof_l("0.100000001", NULL, c_locale) == 0.100000001f,
+         "strtod_l and strtof_l parse with '.' where localeconv's decimal point is empty (the console's)");
+   host_empty_decimal_point = 0;
    check(ps5_dladdr((const void *)test_posix, NULL) == 0, "dladdr reports nothing");
 
    char *end = NULL;

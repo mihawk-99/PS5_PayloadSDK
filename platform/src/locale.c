@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <locale.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,6 +49,16 @@ ps5_freelocale(void *locale)
  * they stand. */
 #define PS5_NUMBER_CHARS 512
 
+/* Whether the exported strtod reads '.' as the decimal point. The console's
+ * does while its localeconv() reports an empty decimal point, so what strtod
+ * reads is measured rather than taken from localeconv(). */
+static bool
+strtod_reads_dot(void)
+{
+   char *end = NULL;
+   return strtod("0.5", &end) == 0.5 && end && *end == '\0';
+}
+
 /* Parses s with parse (strtod or strtof, through a double), with '.' as the
  * decimal point even when the global locale's differs. */
 static double
@@ -56,7 +67,8 @@ parse_c_number(const char *s, char **end, double (*parse)(const char *, char **)
    const struct lconv *const conventions = localeconv();
    const char *const point = conventions ? conventions->decimal_point : ".";
    const char *const dot = strchr(s, '.');
-   if (!point || strcmp(point, ".") == 0 || !dot || dot - s >= PS5_NUMBER_CHARS)
+   if (!point || !point[0] || strcmp(point, ".") == 0 || !dot || dot - s >= PS5_NUMBER_CHARS ||
+       strtod_reads_dot())
       return parse(s, end);
    /* Copy the number with the locale's point in place of the first '.', then
     * map the end back: characters after the point shift by the difference. */
