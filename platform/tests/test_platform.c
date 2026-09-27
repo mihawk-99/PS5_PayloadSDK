@@ -425,6 +425,30 @@ test_shm(void)
          "shm: a view of a destroyed object is refused");
 }
 
+/* memfd_create: an object ftruncate sizes, two shared views of it. */
+static void
+test_memfd(void)
+{
+   const int fd = ps5_memfd_create("test", PS5_MFD_CLOEXEC);
+   check(fd >= 0, "memfd: created");
+   check((fcntl(fd, F_GETFD) & FD_CLOEXEC) != 0, "memfd: closed on exec");
+   check(ftruncate(fd, 3 * 0x4000) == 0, "memfd: sized");
+   uint8_t *const a = mmap(NULL, 3 * 0x4000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+   uint8_t *const b = mmap(NULL, 3 * 0x4000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+   check(a != MAP_FAILED && b != MAP_FAILED && a != b, "memfd: two views");
+   check(b[0x4000 + 3] == 0, "memfd: starts zeroed");
+   a[0x4000 + 3] = 0xab;
+   check(b[0x4000 + 3] == 0xab, "memfd: written through one view, read through the other");
+   munmap(b, 3 * 0x4000);
+   munmap(a, 3 * 0x4000);
+   close(fd);
+   const int plain = ps5_memfd_create("test", 0);
+   check(plain >= 0 && (fcntl(plain, F_GETFD) & FD_CLOEXEC) == 0, "memfd: without the flag, kept on exec");
+   close(plain);
+   errno = 0;
+   check(ps5_memfd_create("test", 0x2u) == -1 && errno == EINVAL, "memfd: sealing is refused");
+}
+
 /* ---- libc --------------------------------------------------------------------- */
 
 static void
@@ -1110,6 +1134,9 @@ main(void)
    printf("%s\n", "test_shm");
    fflush(stdout);
    test_shm();
+   printf("%s\n", "test_memfd");
+   fflush(stdout);
+   test_memfd();
    printf("%s\n", "test_posix");
    fflush(stdout);
    test_posix();

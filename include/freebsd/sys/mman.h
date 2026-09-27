@@ -273,6 +273,16 @@ int	munlockall(void);
 int	shm_open(const char *, int, mode_t);
 int	shm_unlink(const char *);
 #endif
+#if __BSD_VISIBLE
+/*
+ * FreeBSD 13's memfd_create, with the one flag the console can honour. No
+ * system module exports it: the platform layer builds it on libkernel's
+ * anonymous shared memory objects (ps5platform/libc.h, ps5_memfd_create),
+ * and a consumer's link binds this name to that.
+ */
+#define	MFD_CLOEXEC	0x00000001
+int	memfd_create(const char *, unsigned int);
+#endif
 __END_DECLS
 
 #endif /* !_KERNEL */

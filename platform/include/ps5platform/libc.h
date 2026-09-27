@@ -31,6 +31,8 @@
  *   open_memstream         no system module exports it, nor funopen,
  *                          fopencookie or fmemopen: libc's FILE on a pipe,
  *                          published through fclose and fflush wraps
+ *   memfd_create           no system module exports it: libkernel's anonymous
+ *                          shared memory object, as FreeBSD 13 builds it
  *
  * They carry a ps5_ prefix: a title that defined libc's own names would
  * export them, which the title converter refuses. Each consumer binds the
@@ -134,6 +136,14 @@ int ps5_pclose(FILE *stream);
 FILE *ps5_open_memstream(char **buffer, size_t *size);
 int __wrap_fclose(FILE *stream);
 int __wrap_fflush(FILE *stream);
+
+/* memfd_create as FreeBSD 13 builds it, on an anonymous shared memory object
+ * (libkernel's shm_open with SHM_ANON): a descriptor ftruncate sizes, whose
+ * MAP_SHARED mappings all show the same pages. The name is only a label, as
+ * on Linux. PS5_MFD_CLOEXEC (MFD_CLOEXEC) is the one flag: the kernel has no
+ * seals to add or huge pages to ask for, so any other fails with EINVAL. */
+#define PS5_MFD_CLOEXEC 0x00000001u
+int ps5_memfd_create(const char *name, unsigned int flags);
 
 /* uname through sysctl; __xuname is what the SDK's utsname.h calls. */
 int ps5___xuname(int length, void *names);

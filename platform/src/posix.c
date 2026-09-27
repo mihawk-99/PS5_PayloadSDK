@@ -19,7 +19,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
+
+#ifndef SHM_ANON
+/* FreeBSD's anonymous object (sys/mman.h), which the host tests' Linux headers
+ * lack; their shm_open (tests/host_kernel.c) takes it as the console's does. */
+#define SHM_ANON ((char *)1)
+#endif
 
 /* ------------------------------------------------------------------ qsort_r */
 
@@ -153,6 +160,19 @@ ps5___xuname(int length, void *names)
    uname_field(field + 3 * length, length, PS5_CTL_KERN, PS5_KERN_VERSION, "");
    uname_field(field + 4 * length, length, PS5_CTL_HW, PS5_HW_MACHINE, "amd64");
    return 0;
+}
+
+/* ------------------------------------------------------------- memfd_create */
+
+int
+ps5_memfd_create(const char *name, unsigned int flags)
+{
+   (void)name;
+   if (flags & ~PS5_MFD_CLOEXEC) {
+      errno = EINVAL;
+      return -1;
+   }
+   return shm_open(SHM_ANON, O_RDWR | ((flags & PS5_MFD_CLOEXEC) ? O_CLOEXEC : 0), 0600);
 }
 
 /* ----------------------------------------------------------------- checking */

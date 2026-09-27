@@ -301,6 +301,19 @@ sceKernelGetTscFrequency(void)
    return 1000000000u;
 }
 
+/* The console's shm_open, for its anonymous objects only (SHM_ANON, which the
+ * platform's memfd_create uses): the host's memfd is the same kind of object. */
+int
+shm_open(const char *path, int flags, mode_t mode)
+{
+   (void)mode;
+   if (path != (const char *)1 || (flags & O_ACCMODE) != O_RDWR) {
+      errno = EINVAL;
+      return -1;
+   }
+   return memfd_create("shm_anon", (flags & O_CLOEXEC) ? MFD_CLOEXEC : 0);
+}
+
 /* The console's getdents: FreeBSD records of a 32-bit inode, a 16-bit length,
  * an 8-bit type, an 8-bit name length and the terminated name, 4-byte aligned. */
 struct linux_dirent64 {
