@@ -159,3 +159,25 @@ Vulkan instance setup, one page below the thread's stack (its PHASE_LOG,
 2026-09-26). A thread that runs code it did not write -- a frontend's, an
 emulator core's -- should ask for its stack; the title gives RetroArch's own
 threads and the cores' 2 MiB.
+
+## Numbers and the floating-point state
+
+Read from the Vulkan CTS title (PPSA99015) on 2026-09-27, before it created a
+device:
+
+| What | Console |
+|---|---|
+| `localeconv()->decimal_point` and `thousands_sep` in the "C" locale | both empty |
+| `strtod("0.100000001")`, `strtof` | 0.1, with '.' read as the point |
+| MXCSR at `main` | 0x9fe0: flush-to-zero and denormals-are-zero on, all exceptions masked |
+| x87 control word | 0x37f |
+| `tanhf`, `expf`, `exp2f`, `ceilf`, `sqrtf`, `acosf`, `ldexpf` and the half-float conversions | correct |
+
+An empty decimal point is not what `strtod` reads, so the C-locale parsing
+(`strtod_l`, `strtof_l`) asks `strtod` itself whether '.' is the point before
+translating anything; it had spliced the empty point in place of '.', and
+through libc++'s `num_get` every `istream >> float` read 0.1 as 1e8.
+
+A process starts with denormals flushed, where every other x86-64 system starts
+at 0x1f80. Nothing seen so far depends on it, but code that relies on IEEE
+denormals on the CPU has to set MXCSR itself.
