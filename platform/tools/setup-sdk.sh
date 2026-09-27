@@ -84,6 +84,14 @@ make -s -C "$tree/platform" clean
 make -s -C "$tree/platform" install DESTDIR="$staging/ps5-payload-sdk"
 printf '%s\n' "$revision" >"$staging/ps5-payload-sdk/.ps5-sdk-revision"
 
-rm -rf -- "$sdk"
-mv -- "$staging/ps5-payload-sdk" "$sdk"
+# Into place by content: a file the new revision did not change keeps its
+# time, so what builds against the SDK (the CTS, RADV) rebuilds only what the
+# change touched instead of everything.
+if command -v rsync >/dev/null; then
+    mkdir -p -- "$sdk"
+    rsync -rlp --checksum --delete -- "$staging/ps5-payload-sdk/" "$sdk/"
+else
+    rm -rf -- "$sdk"
+    mv -- "$staging/ps5-payload-sdk" "$sdk"
+fi
 echo "==> [sdk] $sdk: payload SDK v0.42 with the PS5 fork at $revision"
