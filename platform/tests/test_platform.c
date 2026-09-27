@@ -777,8 +777,27 @@ test_posix(void)
    errno = 0;
    check(ps5_popen("true", "r") == NULL && errno == ENOSYS, "popen fails with ENOSYS");
    char *buffer = NULL;
-   size_t size = 0;
-   check(ps5_open_memstream(&buffer, &size) == NULL && errno == ENOSYS, "open_memstream fails with ENOSYS");
+   size_t size = 1;
+   FILE *const memory_stream = ps5_open_memstream(&buffer, &size);
+   check(memory_stream != NULL && buffer != NULL && size == 0 && buffer[0] == '\0', "open_memstream starts empty");
+   if (memory_stream) {
+      fputs("hello", memory_stream);
+      fflush(memory_stream);
+      check(size == 5 && strcmp(buffer, "hello") == 0, "fflush publishes a memory stream's text");
+      /* Far more than a pipe holds: the reader drains while the writer writes. */
+      enum { lines = 200000 };
+      for (int i = 0; i < lines; i++)
+         fprintf(memory_stream, "%07d\n", i);
+      check(fclose(memory_stream) == 0, "fclose closes a memory stream");
+      bool intact = size == 5 + (size_t)lines * 8 && buffer[size] == '\0';
+      for (int i = 0; intact && i < lines; i += 997) {
+         char line[9];
+         snprintf(line, sizeof(line), "%07d\n", i);
+         intact = memcmp(buffer + 5 + (size_t)i * 8, line, 8) == 0;
+      }
+      check(intact, "fclose publishes all 1.6 MB written through a memory stream, in order and terminated");
+      free(buffer);
+   }
 
    char names[5][32];
    memset(names, 'x', sizeof(names));

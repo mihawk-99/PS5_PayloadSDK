@@ -105,14 +105,7 @@ ps5_pclose(FILE *stream)
    return -1;
 }
 
-FILE *
-ps5_open_memstream(char **buffer, size_t *size)
-{
-   (void)buffer;
-   (void)size;
-   errno = ENOSYS;
-   return NULL;
-}
+/* open_memstream is src/memstream.c's. */
 
 /* -------------------------------------------------------------------- uname */
 

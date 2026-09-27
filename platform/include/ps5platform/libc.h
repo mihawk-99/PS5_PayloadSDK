@@ -26,10 +26,11 @@
  *                          FreeBSD headers call the last two)
  *   newlocale, freelocale, strtod_l, strtof_l, dladdr
  *                          no system module exports them; the locale is "C"
- *   popen, pclose, open_memstream
- *                          no system module exports them, nor fork, funopen
- *                          or fopencookie to build them on: they fail as
- *                          POSIX lets them
+ *   popen, pclose          no system module exports them, nor fork: they fail
+ *                          as POSIX lets them
+ *   open_memstream         no system module exports it, nor funopen,
+ *                          fopencookie or fmemopen: libc's FILE on a pipe,
+ *                          published through fclose and fflush wraps
  *
  * They carry a ps5_ prefix: a title that defined libc's own names would
  * export them, which the title converter refuses. Each consumer binds the
@@ -119,11 +120,20 @@ int ps5_mkstemps(char *path_template, int suffix_length);
 /* The exported syslog takes no identity: opening the log changes nothing. */
 void ps5_openlog(const char *ident, int option, int facility);
 
-/* A title starts no processes and has no memory-backed stdio stream: these
- * fail, with ENOSYS. */
+/* A title starts no processes: these fail, with ENOSYS. */
 FILE *ps5_popen(const char *command, const char *mode);
 int ps5_pclose(FILE *stream);
+
+/* POSIX open_memstream (src/memstream.c): libc's own FILE on a pipe, which a
+ * reader thread drains into a buffer from malloc. As POSIX says, *buffer (NUL-
+ * terminated) and *size (without the NUL) are brought up to date by fflush and
+ * fclose, and after fclose the buffer is the caller's to free. That needs the
+ * consumer's link to wrap both (--wrap=fclose --wrap=fflush, which this layer's
+ * __wrap_fclose and __wrap_fflush serve); without the wraps it fails with
+ * ENOSYS. */
 FILE *ps5_open_memstream(char **buffer, size_t *size);
+int __wrap_fclose(FILE *stream);
+int __wrap_fflush(FILE *stream);
 
 /* uname through sysctl; __xuname is what the SDK's utsname.h calls. */
 int ps5___xuname(int length, void *names);
