@@ -193,3 +193,18 @@ float as normal (`fpclassify` and `__builtin_fpclassify` both, read from the
 CTS title with the IEEE state set), so the CTS's OpFma checks never allowed a
 flushed denormal input. The SDK's compiler wrappers pass
 `-fdenormal-fp-math=ieee`, which is right under either state.
+
+## Memory streams
+
+No system module exports `open_memstream`, nor `funopen`, `fopencookie` or
+`fmemopen` to build one on (checked by name against the libc and libkernel
+exports), and the ENOSYS stub the platform had left every user of it empty:
+RADV prints the ACO IR it records through Mesa's `u_memstream`, and the CTS's
+pipeline executable_properties cases, which ask for that text, read an empty
+representation (and crashed the CTS title before RADV stopped reading a
+missing one). libc's `fdopen` takes any descriptor, and libkernel exports
+`pipe`, `poll` and `fcntl`: `ps5_open_memstream` (src/memstream.c) is libc's
+own FILE on a pipe, drained by a reader thread, and published through the
+`fflush` and `fclose` wraps. In the CTS title, linked with
+`--wrap=fclose --wrap=fflush`, all 42 dEQP-VK.pipeline.*.executable_properties
+cases pass, the recorded IR among them.
