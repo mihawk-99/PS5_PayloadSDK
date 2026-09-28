@@ -19,7 +19,13 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#if __has_include(<sys/sockio.h>)
+#include <sys/sockio.h> /* SIOCATMARK on FreeBSD; <sys/socket.h> has it elsewhere */
+#endif
 #include <sys/time.h>
+#include <sys/times.h>
 #include <unistd.h>
 
 /* gmtime and localtime return one static buffer each; the copy is taken under
@@ -116,6 +122,55 @@ ps5_getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size, struc
    if (result)
       *result = NULL;
    return 0;
+}
+
+struct passwd *
+ps5_getpwuid(uid_t uid)
+{
+   (void)uid;
+   errno = 0;
+   return NULL;
+}
+
+void *
+ps5_memccpy(void *destination, const void *source, int c, size_t size)
+{
+   unsigned char *to = destination;
+   const unsigned char *from = source;
+   for (size_t i = 0; i < size; i++) {
+      to[i] = from[i];
+      if (from[i] == (unsigned char)c)
+         return to + i + 1;
+   }
+   return NULL;
+}
+
+/* times() counts in FreeBSD's tick, which the SDK's <time.h> gives callers as
+ * CLK_TCK; a host build of the tests has no such macro. */
+#ifndef CLK_TCK
+#define CLK_TCK 128
+#endif
+
+clock_t
+ps5_times(struct tms *buffer)
+{
+   struct timespec cpu, now;
+   if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &cpu) != 0 || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return (clock_t)-1;
+   if (buffer) {
+      buffer->tms_utime = (clock_t)(cpu.tv_sec * CLK_TCK + cpu.tv_nsec / (1000000000 / CLK_TCK));
+      buffer->tms_stime = 0;
+      buffer->tms_cutime = 0;
+      buffer->tms_cstime = 0;
+   }
+   return (clock_t)(now.tv_sec * CLK_TCK + now.tv_nsec / (1000000000 / CLK_TCK));
+}
+
+int
+ps5_sockatmark(int fd)
+{
+   int mark = 0;
+   return ioctl(fd, SIOCATMARK, &mark) == -1 ? -1 : mark != 0;
 }
 
 int
@@ -315,6 +370,16 @@ void
 ps5_freeaddrinfo(struct addrinfo *info)
 {
    (void)info;
+}
+
+struct hostent *
+ps5_gethostbyaddr(const void *address, unsigned int length, int type)
+{
+   (void)address;
+   (void)length;
+   (void)type;
+   h_errno = HOST_NOT_FOUND;
+   return NULL;
 }
 
 struct if_nameindex *

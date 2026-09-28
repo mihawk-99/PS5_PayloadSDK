@@ -32,6 +32,7 @@ extern int host_empty_decimal_point;
 #include <langinfo.h>
 #include <pwd.h>
 #include <string.h>
+#include <sys/times.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -480,6 +481,16 @@ test_libc(void)
    check(ps5_strcasestr(text, ".d64") == text + 17 && ps5_strcasestr(text, "") == text &&
              ps5_strcasestr(text, "c128") == NULL && ps5_strcasestr("", "a") == NULL,
          "libc: strcasestr finds a needle regardless of case");
+   char copy[16] = "xxxxxxxxxxxxxxx";
+   check(ps5_memccpy(copy, "3ds:cia", ':', 7) == copy + 4 && memcmp(copy, "3ds:x", 5) == 0 &&
+             ps5_memccpy(copy, "abc", 'z', 3) == NULL && memcmp(copy, "abc:x", 5) == 0,
+         "libc: memccpy stops after the byte and says where");
+   struct tms cpu;
+   const clock_t start = ps5_times(&cpu);
+   check(start != (clock_t)-1 && cpu.tms_stime == 0 && cpu.tms_cutime == 0,
+         "libc: times answers in clock ticks");
+   check(ps5_getpwuid(0) == NULL, "libc: getpwuid finds no user");
+   check(ps5_gethostbyaddr("\x7f\0\0\1", 4, 2) == NULL, "libc: gethostbyaddr finds no host");
    struct passwd entry, *found = &entry;
    char entry_buffer[256];
    check(ps5_getpwuid_r(getuid(), &entry, entry_buffer, sizeof(entry_buffer), &found) == 0 && found == NULL,

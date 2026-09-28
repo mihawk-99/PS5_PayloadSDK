@@ -9,7 +9,8 @@
  * by one of our titles.
  *
  *   gmtime_r, localtime_r, utimensat, futimens, dirfd, clock_nanosleep,
- *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex, strcasestr
+ *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex, strcasestr,
+ *   memccpy, times, sockatmark, getpwuid, gethostbyaddr
  *                          no system module exports them
  *   openat, unlinkat, fchmodat, fstatat, mkdirat, renameat
  *                          only libkernel_sys exports them, which titles do
@@ -61,8 +62,10 @@ extern "C" {
 #endif
 
 struct addrinfo;
+struct hostent;
 struct if_nameindex;
 struct passwd;
+struct tms;
 
 struct tm *ps5_gmtime_r(const time_t *time, struct tm *result);
 struct tm *ps5_localtime_r(const time_t *time, struct tm *result);
@@ -85,6 +88,19 @@ char *ps5_strcasestr(const char *haystack, const char *needle);
 /* A title has no user database: every lookup finds no entry (0, *result
  * NULL), as POSIX answers for a user it does not know. */
 int ps5_getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size, struct passwd **result);
+struct passwd *ps5_getpwuid(uid_t uid);
+
+/* Copies up to size bytes, stopping after the first byte equal to c; the
+ * address after that byte, or NULL when it was not found. */
+void *ps5_memccpy(void *destination, const void *source, int c, size_t size);
+
+/* The process's CPU time in *buffer (its children have none) and the time
+ * since the title started, both in clock ticks (CLK_TCK). */
+clock_t ps5_times(struct tms *buffer);
+
+/* Whether the socket's read pointer is at the out-of-band mark, through
+ * SIOCATMARK, as FreeBSD implements it. */
+int ps5_sockatmark(int fd);
 
 /* Makes the file at least offset + length bytes long with the bytes past its
  * end written as zeros, so the space is taken, not a hole; bytes already in
@@ -112,6 +128,7 @@ int ps5_clock_nanosleep(clockid_t clock, int flags, const struct timespec *reque
 int ps5_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
                     struct addrinfo **result);
 void ps5_freeaddrinfo(struct addrinfo *info);
+struct hostent *ps5_gethostbyaddr(const void *address, unsigned int length, int type);
 struct if_nameindex *ps5_if_nameindex(void);
 void ps5_if_freenameindex(struct if_nameindex *list);
 
