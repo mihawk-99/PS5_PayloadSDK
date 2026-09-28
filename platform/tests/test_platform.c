@@ -30,6 +30,7 @@ extern int host_empty_decimal_point;
 #include <stdio.h>
 #include <stdlib.h>
 #include <langinfo.h>
+#include <pwd.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -475,6 +476,25 @@ test_libc(void)
    check(ps5_statvfs("/", &space) == 0 && space.f_bavail * space.f_frsize == (16ull << 30),
          "libc: statvfs answers 16 GiB free");
    check(ps5_statvfs("/no/such/path", &space) == -1, "libc: statvfs of a missing path fails");
+   struct passwd entry, *found = &entry;
+   char entry_buffer[256];
+   check(ps5_getpwuid_r(getuid(), &entry, entry_buffer, sizeof(entry_buffer), &found) == 0 && found == NULL,
+         "libc: getpwuid_r finds no user");
+   {
+      char name[] = "/tmp/ps5-platform-fallocate-XXXXXX";
+      const int fd = mkstemp(name);
+      unlink(name);
+      const bool written = fd >= 0 && pwrite(fd, "abc", 3, 0) == 3;
+      struct stat grown = {0};
+      char head[3] = {0}, tail = 1;
+      const bool ok = written && ps5_posix_fallocate(fd, 2, 40000) == 0 && fstat(fd, &grown) == 0 &&
+                      grown.st_size == 40002 && pread(fd, head, 3, 0) == 3 && !memcmp(head, "abc", 3) &&
+                      pread(fd, &tail, 1, 40001) == 1 && tail == 0 && ps5_posix_fallocate(fd, 0, 10) == 0 &&
+                      fstat(fd, &grown) == 0 && grown.st_size == 40002;
+      check(ok, "libc: posix_fallocate writes zeros past the end and leaves the rest");
+      if (fd >= 0)
+         close(fd);
+   }
    char path[64];
    check(ps5_join_path("/app0", "saves", path, sizeof(path)) == 0 && !strcmp(path, "/app0/saves"),
          "libc: a path joined");

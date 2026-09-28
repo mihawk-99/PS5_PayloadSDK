@@ -62,6 +62,7 @@ extern "C" {
 
 struct addrinfo;
 struct if_nameindex;
+struct passwd;
 
 struct tm *ps5_gmtime_r(const time_t *time, struct tm *result);
 struct tm *ps5_localtime_r(const time_t *time, struct tm *result);
@@ -76,6 +77,15 @@ uint32_t ps5_arc4random_uniform(uint32_t bound);
  * room. */
 int ps5_statvfs(const char *path, struct statvfs *result);
 int ps5_fstatvfs(int fd, struct statvfs *result);
+
+/* A title has no user database: every lookup finds no entry (0, *result
+ * NULL), as POSIX answers for a user it does not know. */
+int ps5_getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size, struct passwd **result);
+
+/* Makes the file at least offset + length bytes long with the bytes past its
+ * end written as zeros, so the space is taken, not a hole; bytes already in
+ * the file are left alone. Returns 0 or an errno value, as POSIX says. */
+int ps5_posix_fallocate(int fd, off_t offset, off_t length);
 
 /* Through utimes, with microsecond precision. */
 int ps5_utimensat(int directory, const char *path, const struct timespec times[2], int flags);
