@@ -7,7 +7,9 @@ libc functions the console lacks or refuses. It gives executable code a home in
 direct memory, and it provides shared-memory objects with several views on
 direct memory, with virtual-range reservations. And it gives a title's
 allocations a heap in direct memory (`ps5platform/heap.h`), since libc's own
-private heap runs out long before the title does. The machine context, as the
+private heap runs out long before the title does: an arena for each allocating
+thread, up to eight, usable through the `--wrap` flags (`src/heap_wrap.c`) or
+directly beside a title's own allocator. The machine context, as the
 console lays it out, is corrected in the SDK's own `sys/_ucontext.h`
 (`include/freebsd`), so `uc->uc_mcontext.mc_rip` is the faulting instruction.
 

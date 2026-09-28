@@ -1,4 +1,57 @@
-# ps5-payload-sdk
+# PS5_PayloadSDK
+
+My fork of [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk), based on
+its v0.42 release. It adds one thing the upstream SDK does not have: a **platform
+layer** (`platform/`) that holds, in one place, what every one of my PS5
+homebrew projects needs from the console and cannot take from the SDK as
+released. [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) (the RADV
+port and ps5vk), [PS5_RetroArch](https://github.com/mihawk-99/PS5_RetroArch),
+[PS5_vkQuake](https://github.com/mihawk-99/PS5_vkQuake) and their titles each
+pin one revision of this fork.
+
+Everything below [the upstream SDK](#the-upstream-sdk) is upstream's own
+documentation and applies unchanged.
+
+## The platform layer
+
+`platform/` builds `libps5platform.a` and installs it with its headers
+(`include/ps5platform/`) as part of the SDK. What it provides, and what it
+states about the console, rests on runs on the console
+([PROBE.md](platform/docs/PROBE.md)):
+
+| Header | What it gives a title |
+| --- | --- |
+| `kernel.h` | The exported kernel functions the layer and its consumers call, declared once. |
+| `libc.h` | The libc functions the console lacks, refuses or faults in: `access` (refused to a title for every path), `statvfs`, `getpwuid_r`, `posix_fallocate`, `utimensat`/`futimens`, `clock_nanosleep`, `getaddrinfo`, the directory and `*at` families, `memfd_create`, `open_memstream`, `nl_langinfo`, FreeBSD's `xlocale` family, `regex` (musl's TRE), `backtrace`, `dladdr`, `__cxa_thread_atexit_impl`, and more. |
+| `heap.h` | A heap in direct memory for the title's own allocations, since libc's private heap runs out long before the title does: dlmalloc mspaces, one for each allocating thread up to eight, so threads compiling shaders at once do not wait on each other. Titles take it through `--wrap=malloc` and its family, or call `ps5_heap_malloc` and the rest beside an allocator of their own. |
+| `exec.h`, `shm.h` | Executable code in direct memory (for JITs), and shared-memory objects with several views, with virtual-range reservations. |
+| `fp.h`, `context.h` | The floating-point state threads start with, and the machine context as the console lays it out (`uc_mcontext.mc_rip` is the faulting instruction). |
+| `klog.h` | A title's standard error in the kernel log. |
+| `agc.h`, `videoout.h` | The exported AGC and VideoOut functions the GPU drivers call. |
+| `probe.h` | The console capability probe behind [PROBE.md](platform/docs/PROBE.md). |
+
+Rules the layer keeps: it calls exported functions only, and what it states
+about the console comes from its own probes, not from reading the system
+software. `make -C platform test` runs its host unit tests against a host model
+of the console's kernel.
+
+## How projects consume it
+
+A project pins a revision of this fork. Its dependency setup exports that
+revision with `git archive` and runs `platform/tools/setup-sdk.sh` from the
+export: the script downloads the upstream v0.42 release, checks its digest,
+installs this revision's headers, compiler wrappers and platform layer over it,
+and records the revision in the SDK directory's `.ps5-sdk-revision`. The
+release's binaries (crt, libc, the stubs, libc++ and the host tools) are kept as
+released: they are the binaries every project was validated with on the
+console. More in [platform/README.md](platform/README.md).
+
+Beside the platform layer, the fork changes the host compiler wrappers
+(`host/bin/`), which assume IEEE denormals, and corrects the machine context in
+the SDK's own `sys/_ucontext.h`.
+
+## The upstream SDK
+
 This is an SDK for developing payloads targeted at exploited PS5s. ELF loaders
 known to work include:
 - [ps5-payload-elfldr][elfldr]
