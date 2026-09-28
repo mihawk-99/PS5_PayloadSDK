@@ -493,6 +493,21 @@ test_libc(void)
    check(ps5_getpwuid(0) == NULL, "libc: getpwuid finds no user");
    check(ps5_gethostbyaddr("\x7f\0\0\1", 4, 2) == NULL, "libc: gethostbyaddr finds no host");
    check(ps5_gethostbyname("localhost") == NULL, "libc: gethostbyname finds no host");
+   char interface_name[16];
+   check(ps5_if_nametoindex("lo0") == 0 && ps5_if_indextoname(1, interface_name) == NULL,
+         "libc: interface lookups find nothing, as if_nameindex does");
+   char temporary[] = "/tmp/ps5-platform-tmpfile-XXXXXX";
+   check(mkdtemp(temporary) != NULL, "libc: a directory for tmpfile");
+   setenv("TMPDIR", temporary, 1);
+   FILE *const scratch = ps5_tmpfile();
+   char readback[8] = "";
+   check(scratch && fputs("azahar", scratch) >= 0 && fseek(scratch, 0, SEEK_SET) == 0 &&
+             fgets(readback, sizeof(readback), scratch) && !strcmp(readback, "azahar"),
+         "libc: tmpfile reads back what was written");
+   if (scratch)
+      fclose(scratch);
+   unsetenv("TMPDIR");
+   check(rmdir(temporary) == 0, "libc: tmpfile left no file behind");
    char host[16] = "x", service[16] = "y";
    check(ps5_getnameinfo("", 16, host, sizeof(host), service, sizeof(service), 0) == EAI_FAIL &&
              !host[0] && !service[0],

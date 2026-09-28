@@ -10,7 +10,8 @@
  *
  *   gmtime_r, localtime_r, utimensat, futimens, dirfd, clock_nanosleep,
  *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex, strcasestr,
- *   memccpy, times, sockatmark, getpwuid, gethostbyaddr
+ *   memccpy, times, sockatmark, getpwuid, gethostbyaddr, tmpfile,
+ *   if_nametoindex, if_indextoname
  *                          no system module exports them
  *   openat, unlinkat, fchmodat, fstatat, mkdirat, renameat
  *                          only libkernel_sys exports them, which titles do
@@ -134,6 +135,8 @@ int ps5_getnameinfo(const void *address, unsigned int length, char *host, unsign
                     char *service, unsigned int service_size, int flags);
 struct if_nameindex *ps5_if_nameindex(void);
 void ps5_if_freenameindex(struct if_nameindex *list);
+unsigned int ps5_if_nametoindex(const char *name);
+char *ps5_if_indextoname(unsigned int index, char *name);
 
 /* The working directory, found by walking up from "." (libc's getcwd faults
  * for a title: the __getcwd it calls is only in libkernel_sys). NULL buffer:
@@ -166,6 +169,9 @@ void ps5_qsort_r(void *base, size_t count, size_t size, void *thunk,
 /* Replaces the six X's before a suffix of suffix_length characters; the file
  * is created 0666, since a title's files stay reachable over FTP. */
 int ps5_mkstemps(char *path_template, int suffix_length);
+/* An unnamed read-write file, removed as it is created: in $TMPDIR, or in the
+ * title's own /app0/tmp (made 0777). */
+FILE *ps5_tmpfile(void);
 
 /* The exported syslog takes no identity: opening the log changes nothing. */
 void ps5_openlog(const char *ident, int option, int facility);

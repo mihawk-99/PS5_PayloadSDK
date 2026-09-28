@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef SHM_ANON
@@ -81,6 +82,38 @@ ps5_mkstemps(char *path_template, int suffix_length)
    memcpy(x, "XXXXXX", 6);
    errno = EEXIST;
    return -1;
+}
+
+/* ------------------------------------------------------------------ tmpfile */
+
+/* A file with no name, removed as it is created: in $TMPDIR, or else in tmp/ in
+ * the title's own folder, which a homebrew title may write (made 0777, so it
+ * stays reachable over FTP like everything else a title creates). */
+FILE *
+ps5_tmpfile(void)
+{
+   const char *directory = getenv("TMPDIR");
+   if (!directory || !*directory) {
+      directory = "/app0/tmp";
+      if (mkdir(directory, 0777) == 0)
+         chmod(directory, 0777); /* past the umask */
+   }
+   char path[1024];
+   if ((size_t)snprintf(path, sizeof(path), "%s/tmpXXXXXX", directory) >= sizeof(path)) {
+      errno = ENAMETOOLONG;
+      return NULL;
+   }
+   const int fd = ps5_mkstemps(path, 0);
+   if (fd < 0)
+      return NULL;
+   unlink(path);
+   FILE *const file = fdopen(fd, "w+");
+   if (!file) {
+      const int error = errno;
+      close(fd);
+      errno = error;
+   }
+   return file;
 }
 
 /* ------------------------------------------------------------------- syslog */

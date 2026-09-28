@@ -410,6 +410,23 @@ ps5_if_nameindex(void)
    return NULL;
 }
 
+unsigned int
+ps5_if_nametoindex(const char *name)
+{
+   (void)name;
+   errno = ENXIO;
+   return 0;
+}
+
+char *
+ps5_if_indextoname(unsigned int index, char *name)
+{
+   (void)index;
+   (void)name;
+   errno = ENXIO;
+   return NULL;
+}
+
 void
 ps5_if_freenameindex(struct if_nameindex *list)
 {
