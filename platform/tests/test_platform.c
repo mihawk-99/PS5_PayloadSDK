@@ -1011,6 +1011,35 @@ heap_worker(void *opaque)
    return intact ? opaque : NULL;
 }
 
+/* One thread's blocks, for others to resize and free. */
+static void **handed_blocks;
+
+static void *
+heap_giver(void *opaque)
+{
+   void **given = opaque;
+   handed_blocks = given;
+   for (unsigned i = 0; i < 4096; i++) {
+      given[i] = __wrap_malloc(16 + i % 300);
+      if (given[i])
+         ((unsigned char *)given[i])[0] = (unsigned char)i;
+   }
+   return NULL;
+}
+
+static void *
+heap_taker(void *opaque)
+{
+   const unsigned first = (unsigned)(uintptr_t)opaque;
+   bool intact = true;
+   for (unsigned i = first; i < 4096; i += 4) {
+      unsigned char *grown = __wrap_realloc(handed_blocks[i], 1000 + i);
+      intact &= grown && grown[0] == (unsigned char)i && ps5_heap_owns(grown);
+      __wrap_free(grown);
+   }
+   return intact ? (void *)1 : NULL;
+}
+
 static void
 test_heap(void)
 {
@@ -1127,6 +1156,27 @@ test_heap(void)
       threads_intact &= result == (void *)(i + 1);
    }
    check(threads_intact, "heap: eight threads allocating and freeing keep every block intact");
+   ps5_heap_stats(&stats);
+   check(stats.arenas > 1 && stats.arenas <= 8, "heap: allocating threads have arenas of their own");
+
+   /* Blocks one thread allocated, freed and resized by others. */
+   enum { handed = 4096 };
+   static void *given[handed];
+   pthread_t giver;
+   pthread_create(&giver, NULL, heap_giver, given);
+   pthread_join(giver, NULL);
+   bool handed_intact = true;
+   for (unsigned i = 0; i < handed; i++)
+      handed_intact &= given[i] && ps5_heap_owns(given[i]) && ((unsigned char *)given[i])[0] == (unsigned char)i;
+   pthread_t takers[4];
+   for (uintptr_t t = 0; t < 4; t++)
+      pthread_create(&takers[t], NULL, heap_taker, (void *)t);
+   for (uintptr_t t = 0; t < 4; t++) {
+      void *result = NULL;
+      pthread_join(takers[t], &result);
+      handed_intact &= result != NULL;
+   }
+   check(handed_intact, "heap: blocks go back to their own arena from other threads");
 }
 
 static void

@@ -10,9 +10,11 @@
  * is a separate pool of 12 GiB (docs/PROBE.md).
  *
  * The title heap serves the title's own allocations from direct memory:
- * dlmalloc 2.8.6 (src/dlmalloc, MIT) as one locked mspace whose segments are
- * direct memory mapped CPU read-write inside one reserved range, so a pointer
- * is the heap's exactly when it lies in that range. libc's private heap is
+ * dlmalloc 2.8.6 (src/dlmalloc, MIT) as locked mspaces, one for each
+ * allocating thread up to eight, whose segments are direct memory mapped CPU
+ * read-write inside one reserved range, so a pointer is the heap's exactly
+ * when it lies in that range; a block goes back to its own mspace from any
+ * thread. libc's private heap is
  * left to the system libraries, which allocate from it themselves.
  *
  * A title links it with these flags, which route every reference its own
@@ -60,6 +62,8 @@ struct ps5_heap_stats {
    unsigned segments;
    /* Allocations the heap could not serve and libc did. */
    unsigned long long libc_fallbacks;
+   /* The arenas made so far: one for each allocating thread, up to eight. */
+   unsigned arenas;
 };
 
 void ps5_heap_stats(struct ps5_heap_stats *stats);

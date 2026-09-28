@@ -10,8 +10,15 @@
  * released. dlmalloc joins a segment to the one before it when the two are
  * adjacent, so a return can span several of the segments recorded here.
  *
- * Segments are mapped and returned only under the mspace's lock, or by the
- * one thread creating the mspace, so the table needs no lock of its own.
+ * The heap is several dlmalloc mspaces, its arenas, which map their
+ * segments from the one range. A thread allocates from the arena it was
+ * given at its first allocation, round robin, so threads allocating at once
+ * wait on each other only when they share one: with one lock over the heap,
+ * RADV's shader compiles took twice as long on eight threads (measured on the
+ * host, 2026-09-28), and a title compiles pipelines on several. Each block
+ * records its arena (dlmalloc's FOOTERS), so a free or realloc from any
+ * thread goes to the arena the block came from. Arenas map and return
+ * segments under a lock of the table's own.
  */
 #include "ps5platform/heap.h"
 
@@ -19,6 +26,7 @@
 #include "ps5platform/kernel.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -62,8 +70,16 @@ static unsigned long long libc_fallbacks;
 static uintptr_t range_base;
 static size_t range_bytes;
 
-static mspace heap;
-static int heap_state; /* 0 none, 1 creating, 2 ready, 3 refused */
+#define HEAP_ARENAS 8
+
+/* 0 none, 1 in progress, 2 ready, 3 refused. */
+static int range_state;
+static mspace arenas[HEAP_ARENAS];
+static int arena_states[HEAP_ARENAS];
+static unsigned arena_next;
+static pthread_key_t arena_key;
+static pthread_once_t arena_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t segment_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static bool
 reserve_range(void)
@@ -80,8 +96,8 @@ reserve_range(void)
    return false;
 }
 
-void *
-ps5p_heap_map(size_t bytes)
+static void *
+heap_map_locked(size_t bytes)
 {
    bytes = ps5p_round_up(bytes, HEAP_UNIT);
    if (bytes == 0 || segment_count >= HEAP_MAX_SEGMENTS)
@@ -120,8 +136,17 @@ ps5p_heap_map(size_t bytes)
    return at;
 }
 
-int
-ps5p_heap_unmap(void *address, size_t bytes)
+void *
+ps5p_heap_map(size_t bytes)
+{
+   pthread_mutex_lock(&segment_lock);
+   void *const at = heap_map_locked(bytes);
+   pthread_mutex_unlock(&segment_lock);
+   return at;
+}
+
+static int
+heap_unmap_locked(void *address, size_t bytes)
 {
    if ((uintptr_t)address < range_base)
       return -1;
@@ -155,27 +180,84 @@ ps5p_heap_unmap(void *address, size_t bytes)
    return 0;
 }
 
+int
+ps5p_heap_unmap(void *address, size_t bytes)
+{
+   pthread_mutex_lock(&segment_lock);
+   const int result = heap_unmap_locked(address, bytes);
+   pthread_mutex_unlock(&segment_lock);
+   return result;
+}
+
+/* Once, by whichever thread asks first; the others wait for it. */
+static bool
+once(int *state, bool (*make)(void *), void *context)
+{
+   int seen = __atomic_load_n(state, __ATOMIC_ACQUIRE);
+   if (seen == 0 &&
+       __atomic_compare_exchange_n(state, &seen, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+      __atomic_store_n(state, make(context) ? 2 : 3, __ATOMIC_RELEASE);
+   while ((seen = __atomic_load_n(state, __ATOMIC_ACQUIRE)) == 1)
+      ;
+   return seen == 2;
+}
+
+static bool
+make_range(void *unused)
+{
+   (void)unused;
+   return reserve_range();
+}
+
+static bool
+make_arena(void *slot)
+{
+   mspace *const arena = slot;
+   *arena = create_mspace(0, 1);
+   return *arena != NULL;
+}
+
+static mspace
+arena(unsigned index)
+{
+   return once(&arena_states[index], make_arena, &arenas[index]) ? arenas[index] : NULL;
+}
+
+static void
+make_arena_key(void)
+{
+   pthread_key_create(&arena_key, NULL);
+}
+
+/* The calling thread's arena: given at its first allocation (the key's
+ * values are the arena's index plus one), made when first given. An arena
+ * that cannot be made leaves its threads the first one. */
 static mspace
 title_heap(void)
 {
-   int state = __atomic_load_n(&heap_state, __ATOMIC_ACQUIRE);
-   if (state == 2)
-      return heap;
-   if (state == 0 &&
-       __atomic_compare_exchange_n(&heap_state, &state, 1, false, __ATOMIC_ACQ_REL,
-                                   __ATOMIC_ACQUIRE)) {
-      heap = reserve_range() ? create_mspace(0, 1) : NULL;
-      __atomic_store_n(&heap_state, heap ? 2 : 3, __ATOMIC_RELEASE);
+   if (!once(&range_state, make_range, NULL))
+      return NULL;
+   pthread_once(&arena_key_once, make_arena_key);
+   uintptr_t slot = (uintptr_t)pthread_getspecific(arena_key);
+   if (slot == 0) {
+      slot = __atomic_fetch_add(&arena_next, 1, __ATOMIC_RELAXED) % HEAP_ARENAS + 1;
+      pthread_setspecific(arena_key, (void *)slot);
    }
-   while ((state = __atomic_load_n(&heap_state, __ATOMIC_ACQUIRE)) == 1)
-      ;
-   return state == 2 ? heap : NULL;
+   const mspace space = arena((unsigned)slot - 1);
+   return space || slot == 1 ? space : arena(0);
+}
+
+/* A block's own arena frees and resizes it, whichever is named (FOOTERS). */
+static mspace
+any_arena(void)
+{
+   return arenas[0];
 }
 
 bool
 ps5_heap_owns(const void *pointer)
 {
-   if (__atomic_load_n(&heap_state, __ATOMIC_ACQUIRE) != 2)
+   if (__atomic_load_n(&range_state, __ATOMIC_ACQUIRE) != 2)
       return false;
    return (uintptr_t)pointer - range_base < range_bytes;
 }
@@ -183,13 +265,16 @@ ps5_heap_owns(const void *pointer)
 void
 ps5_heap_stats(struct ps5_heap_stats *stats)
 {
-   const bool ready = __atomic_load_n(&heap_state, __ATOMIC_ACQUIRE) == 2;
+   const bool ready = __atomic_load_n(&range_state, __ATOMIC_ACQUIRE) == 2;
    stats->range_base = ready ? range_base : 0;
    stats->range_bytes = ready ? range_bytes : 0;
-   /* Read without the mspace's lock: a report, not a decision. */
+   /* Read without the segment lock: a report, not a decision. */
    stats->mapped_bytes = mapped_bytes;
    stats->peak_bytes = peak_bytes;
    stats->segments = segment_count;
+   stats->arenas = 0;
+   for (unsigned i = 0; i < HEAP_ARENAS; i++)
+      stats->arenas += __atomic_load_n(&arena_states[i], __ATOMIC_ACQUIRE) == 2;
    stats->libc_fallbacks = __atomic_load_n(&libc_fallbacks, __ATOMIC_RELAXED);
 }
 
@@ -229,7 +314,7 @@ __wrap_free(void *pointer)
    if (!pointer)
       return;
    if (ps5_heap_owns(pointer))
-      mspace_free(heap, pointer);
+      mspace_free(any_arena(), pointer);
    else
       __real_free(pointer);
 }
@@ -253,7 +338,7 @@ __wrap_realloc(void *pointer, size_t bytes)
    if (bytes == 0)
       bytes = 1;
    if (ps5_heap_owns(pointer)) {
-      void *const moved = mspace_realloc(heap, pointer, bytes);
+      void *const moved = mspace_realloc(any_arena(), pointer, bytes);
       if (moved)
          return moved;
       /* Direct memory is exhausted: move the block to libc. */
@@ -263,7 +348,7 @@ __wrap_realloc(void *pointer, size_t bytes)
       count_fallback();
       const size_t kept = mspace_usable_size(pointer);
       memcpy(copy, pointer, kept < bytes ? kept : bytes);
-      mspace_free(heap, pointer);
+      mspace_free(any_arena(), pointer);
       return copy;
    }
    void *const moved = __real_realloc(pointer, bytes);

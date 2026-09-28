@@ -15,6 +15,9 @@ int ps5p_heap_unmap(void *address, size_t bytes);
 
 #define ONLY_MSPACES 1
 #define USE_LOCKS 1
+/* Each block records its mspace, so a free or realloc from any thread goes to
+ * the arena the block came from (src/heap.c). */
+#define FOOTERS 1
 #define HAVE_MORECORE 0
 #define HAVE_MMAP 1
 #define HAVE_MREMAP 0
@@ -25,7 +28,9 @@ int ps5p_heap_unmap(void *address, size_t bytes);
  * are 32: its compilers emit 32-byte-aligned AVX stores into plain new
  * objects. */
 #define MALLOC_ALIGNMENT ((size_t)32)
-#define DEFAULT_GRANULARITY ((size_t)64 << 20)
+/* Each arena maps this much at a time: small enough that arenas a title
+ * barely uses hold little direct memory. */
+#define DEFAULT_GRANULARITY ((size_t)16 << 20)
 #define DEFAULT_MMAP_THRESHOLD ((size_t)32 << 20)
 #define MALLOC_FAILURE_ACTION errno = ENOMEM
 #define NO_MALLINFO 1
