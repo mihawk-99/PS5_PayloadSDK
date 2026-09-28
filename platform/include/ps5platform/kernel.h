@@ -66,6 +66,8 @@ int32_t sceKernelJitMapSharedMemory(int fd, int protection, void **address);
 
 /* Time and identity. */
 uint64_t sceKernelReadTsc(void);
+/* The CPU the calling thread runs on now. */
+int32_t sceKernelGetCurrentCpu(void);
 uint64_t sceKernelGetTscFrequency(void);
 
 /* The public PS4 SDK's version record: its size is set by the caller. */

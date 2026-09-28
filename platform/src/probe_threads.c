@@ -18,8 +18,12 @@
 #include "ps5platform/probe.h"
 
 #include <pthread.h>
+#include <sched.h>
 #if !defined(__linux__)
 #include <pthread_np.h>
+#include <sys/cpuset.h>
+
+#include "ps5platform/kernel.h"
 #endif
 #include <stdarg.h>
 #include <stdbool.h>
@@ -211,6 +215,116 @@ thread_ping(struct thread_probe *p, bool spin)
               slow);
 }
 
+/* ---- scheduling ---------------------------------------------------------- */
+
+/* The CPU a thread runs on now, and the calling thread's affinity as a mask of
+ * CPUs 0-63. */
+static int
+thread_current_cpu(void)
+{
+#if defined(__linux__)
+   return sched_getcpu();
+#else
+   return sceKernelGetCurrentCpu();
+#endif
+}
+
+static uint64_t
+thread_affinity(pthread_t thread, int *result)
+{
+   uint64_t mask = 0;
+#if defined(__linux__)
+   cpu_set_t set;
+   CPU_ZERO(&set);
+   *result = pthread_getaffinity_np(thread, sizeof(set), &set);
+   for (int cpu = 0; cpu < 64; cpu++)
+      if (CPU_ISSET(cpu, &set))
+         mask |= 1ull << cpu;
+#else
+   cpuset_t set;
+   CPU_ZERO(&set);
+   *result = pthread_getaffinity_np(thread, sizeof(set), &set);
+   for (int cpu = 0; cpu < 64 && cpu < CPU_SETSIZE; cpu++)
+      if (CPU_ISSET(cpu, &set))
+         mask |= 1ull << cpu;
+#endif
+   return mask;
+}
+
+enum { SPREAD_THREADS = 16, SPREAD_MS = 200 };
+
+struct spread {
+   uint64_t seen; /* the CPUs this thread ran on */
+};
+
+static void *
+spread_body(void *opaque)
+{
+   struct spread *const s = opaque;
+   const double end = thread_now_us() + SPREAD_MS * 1000.0;
+   while (thread_now_us() < end) {
+      const int cpu = thread_current_cpu();
+      if (cpu >= 0 && cpu < 64)
+         s->seen |= 1ull << cpu;
+   }
+   return NULL;
+}
+
+/* How the console schedules a title's threads: the policy and priority a
+ * thread has, the range the policy allows, whether a priority can be set and
+ * read back, the affinity threads start with, and the CPUs sixteen spinning
+ * threads run on. */
+static void
+thread_scheduling(struct thread_probe *p)
+{
+   int policy = -1;
+   struct sched_param param;
+   memset(&param, 0, sizeof(param));
+   const int got = pthread_getschedparam(pthread_self(), &policy, &param);
+   thread_say(p, "scheduling calling thread policy=%d priority=%d result=%d range=%d..%d", policy,
+              param.sched_priority, got, sched_get_priority_min(policy), sched_get_priority_max(policy));
+   int affinity_result = -1;
+   const uint64_t affinity = thread_affinity(pthread_self(), &affinity_result);
+   thread_say(p, "scheduling calling thread affinity=%#llx result=%d cpu_now=%d",
+              (unsigned long long)affinity, affinity_result, thread_current_cpu());
+
+   struct spread spreads[SPREAD_THREADS];
+   pthread_t threads[SPREAD_THREADS];
+   unsigned created = 0;
+   memset(spreads, 0, sizeof(spreads));
+   for (unsigned i = 0; i < SPREAD_THREADS; i++)
+      created += pthread_create(&threads[i], NULL, spread_body, &spreads[i]) == 0 ? 1u : 0u;
+   /* One thread's priority changed while it runs, and read back. */
+   int set_result = -1, reread_result = -1, reread_priority = -1, new_policy = -1;
+   if (created == SPREAD_THREADS) {
+      struct sched_param lower = param;
+      lower.sched_priority = policy >= 0 ? sched_get_priority_min(policy) : param.sched_priority;
+      set_result = pthread_setschedparam(threads[0], policy, &lower);
+      struct sched_param back;
+      memset(&back, 0, sizeof(back));
+      reread_result = pthread_getschedparam(threads[0], &new_policy, &back);
+      reread_priority = back.sched_priority;
+   }
+   uint64_t all = 0;
+   char line[256];
+   int used = snprintf(line, sizeof(line), "scheduling spread");
+   for (unsigned i = 0; i < SPREAD_THREADS && i < created; i++) {
+      pthread_join(threads[i], NULL);
+      all |= spreads[i].seen;
+      if (used > 0 && used < (int)sizeof(line) - 24)
+         used += snprintf(line + used, sizeof(line) - (size_t)used, " %#llx",
+                          (unsigned long long)spreads[i].seen);
+   }
+   thread_say(p, "%s", line);
+   unsigned cpus = 0;
+   for (int cpu = 0; cpu < 64; cpu++)
+      cpus += (all >> cpu) & 1u;
+   thread_say(p, "scheduling threads=%u cpus_seen=%#llx (%u) set_priority=%d result=%d reread=%d policy=%d result=%d",
+              created, (unsigned long long)all, cpus,
+              policy >= 0 ? sched_get_priority_min(policy) : -1, set_result, reread_priority, new_policy,
+              reread_result);
+}
+
 int
 ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
 {
@@ -250,6 +364,7 @@ ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
 
    thread_ping(&p, false);
    thread_ping(&p, true);
+   thread_scheduling(&p);
 
    thread_say(&p, "end failures=%d", p.failures);
    return p.failures;
