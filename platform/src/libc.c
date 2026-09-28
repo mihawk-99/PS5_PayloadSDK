@@ -146,6 +146,47 @@ ps5_posix_fallocate(int fd, off_t offset, off_t length)
 }
 
 int
+ps5_access(const char *path, int mode)
+{
+   struct stat status;
+   if (!path) {
+      errno = EFAULT;
+      return -1;
+   }
+   if (mode & ~(R_OK | W_OK | X_OK)) {
+      errno = EINVAL;
+      return -1;
+   }
+   if (stat(path, &status) != 0)
+      return -1;
+   if ((mode & X_OK) && !(status.st_mode & 0111)) {
+      errno = EACCES;
+      return -1;
+   }
+   if (S_ISDIR(status.st_mode)) {
+      if ((mode & W_OK) && !(status.st_mode & 0222)) {
+         errno = EACCES;
+         return -1;
+      }
+      if (mode & R_OK) {
+         const int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+         if (fd < 0)
+            return -1;
+         close(fd);
+      }
+      return 0;
+   }
+   if (mode & (R_OK | W_OK)) {
+      const int how = (mode & R_OK) && (mode & W_OK) ? O_RDWR : (mode & W_OK) ? O_WRONLY : O_RDONLY;
+      const int fd = open(path, how | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
+      if (fd < 0)
+         return -1;
+      close(fd);
+   }
+   return 0;
+}
+
+int
 ps5_statvfs(const char *path, struct statvfs *result)
 {
    struct stat status;

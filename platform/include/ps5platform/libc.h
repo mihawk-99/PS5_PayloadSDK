@@ -87,6 +87,15 @@ int ps5_getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size, s
  * the file are left alone. Returns 0 or an errno value, as POSIX says. */
 int ps5_posix_fallocate(int fd, off_t offset, off_t length);
 
+/* A title's sandbox refuses access() for every path, existing or not
+ * (EPERM, measured on the console), while stat() answers. Existence is asked
+ * of stat(); reading and writing a file, of opening it, since its mode bits do
+ * not predict what a title may do (a title writes files of mode 0644 that
+ * report another owner); reading a folder, of opening it. Writing a folder
+ * and executing or searching are judged by the mode's write and execute bits
+ * (any of the three classes). Fails with errno set, as access() does. */
+int ps5_access(const char *path, int mode);
+
 /* Through utimes, with microsecond precision. */
 int ps5_utimensat(int directory, const char *path, const struct timespec times[2], int flags);
 int ps5_futimens(int fd, const struct timespec times[2]);

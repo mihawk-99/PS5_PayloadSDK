@@ -495,6 +495,32 @@ test_libc(void)
       if (fd >= 0)
          close(fd);
    }
+   {
+      char folder[] = "/tmp/ps5-platform-access-XXXXXX";
+      char file[64];
+      const bool made = mkdtemp(folder) != NULL;
+      snprintf(file, sizeof(file), "%s/file", folder);
+      const int fd = made ? open(file, O_CREAT | O_WRONLY | O_CLOEXEC, 0644) : -1;
+      if (fd >= 0)
+         close(fd);
+      check(fd >= 0 && ps5_access(file, F_OK) == 0 && ps5_access(file, R_OK | W_OK) == 0 &&
+               ps5_access(folder, F_OK) == 0 && ps5_access(folder, R_OK | W_OK | X_OK) == 0,
+            "libc: access finds a file and a folder, readable and writable");
+      errno = 0;
+      const bool missing = ps5_access("/no/such/path", F_OK) == -1 && errno == ENOENT;
+      errno = 0;
+      const bool not_executable = ps5_access(file, X_OK) == -1 && errno == EACCES;
+      errno = 0;
+      const bool bad_mode = ps5_access(file, 0x100) == -1 && errno == EINVAL;
+      check(missing && not_executable && bad_mode, "libc: access fails as access() does");
+      if (getuid() != 0 && chmod(file, 0444) == 0) {
+         errno = 0;
+         check(ps5_access(file, W_OK) == -1 && errno == EACCES && ps5_access(file, R_OK) == 0,
+               "libc: access asks the file system whether a file can be written");
+      }
+      unlink(file);
+      rmdir(folder);
+   }
    char path[64];
    check(ps5_join_path("/app0", "saves", path, sizeof(path)) == 0 && !strcmp(path, "/app0/saves"),
          "libc: a path joined");
