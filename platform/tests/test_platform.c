@@ -601,6 +601,23 @@ test_directories(void)
       again += entry->d_name[0] != '.';
    check(again == 3, "dir: rewinddir reads it again");
    check(ps5_closedir(stream) == 0, "dir: closedir");
+   /* The working directory, walked up from inside the scratch tree. */
+   char before[512], expected[512], found[512];
+   snprintf(path, sizeof(path), "%s/sub2", root);
+   mkdir(path, 0755);
+   check(getcwd(before, sizeof(before)) != NULL && chdir(path) == 0 &&
+             getcwd(expected, sizeof(expected)) != NULL,
+         "dir: into a directory to find");
+   check(ps5_getcwd(found, sizeof(found)) == found && !strcmp(found, expected),
+         "dir: getcwd walks up to the same path getcwd gives");
+   char *allocated = ps5_getcwd(NULL, 0);
+   check(allocated && !strcmp(allocated, expected), "dir: getcwd allocates when given no buffer");
+   free(allocated);
+   check(ps5_getcwd(found, 4) == NULL && errno == ERANGE, "dir: getcwd reports a short buffer");
+   check(chdir("/") == 0 && ps5_getcwd(found, sizeof(found)) && !strcmp(found, "/"),
+         "dir: getcwd of the root");
+   check(chdir(before) == 0, "dir: back to where the test started");
+   rmdir(path);
    for (int i = 0; i < 3; i++) {
       snprintf(path, sizeof(path), "%s/%s", root, names[i]);
       unlink(path);

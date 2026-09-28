@@ -262,6 +262,84 @@ ps5_closedir(DIR *opaque)
    return result;
 }
 
+/* ---- the working directory --------------------------------------------------- */
+
+/* libc's getcwd asks __getcwd, which only libkernel_sys exports, so for a title
+ * it calls through an import that resolved to nothing and faults (VICE's core,
+ * on the console). This is getcwd the classic way: from "." up to the root,
+ * each directory is named by the entry of its parent with the same device and
+ * inode, looked up with lstat, which also crosses a mount point such as /app0. */
+char *
+ps5_getcwd(char *buffer, size_t size)
+{
+   char path[PATH_BYTES]; /* the answer, built from its end */
+   size_t start = sizeof(path) - 1;
+   path[start] = '\0';
+   char up[PATH_BYTES] = ".";
+   struct stat here, parent;
+   if (buffer && size == 0) {
+      errno = EINVAL;
+      return NULL;
+   }
+   if (stat(".", &here) != 0)
+      return NULL;
+   for (;;) {
+      char above[PATH_BYTES];
+      if ((size_t)snprintf(above, sizeof(above), "%s/..", up) >= sizeof(above) ||
+          stat(above, &parent) != 0) {
+         errno = ENAMETOOLONG;
+         return NULL;
+      }
+      if (parent.st_dev == here.st_dev && parent.st_ino == here.st_ino)
+         break; /* the root is its own parent */
+      DIR *const directory = ps5_opendir(above);
+      if (!directory)
+         return NULL;
+      bool found = false;
+      for (struct dirent *entry; !found && (entry = ps5_readdir(directory));) {
+         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+         char candidate[PATH_BYTES];
+         struct stat status;
+         if ((size_t)snprintf(candidate, sizeof(candidate), "%s/%s", above, entry->d_name) <
+                sizeof(candidate) &&
+             lstat(candidate, &status) == 0 && status.st_dev == here.st_dev &&
+             status.st_ino == here.st_ino) {
+            const size_t length = strlen(entry->d_name);
+            if (length + 1 > start) {
+               ps5_closedir(directory);
+               errno = ENAMETOOLONG;
+               return NULL;
+            }
+            start -= length;
+            memcpy(path + start, entry->d_name, length);
+            path[--start] = '/';
+            found = true;
+         }
+      }
+      ps5_closedir(directory);
+      if (!found) {
+         errno = ENOENT;
+         return NULL;
+      }
+      here = parent;
+      memcpy(up, above, strlen(above) + 1);
+   }
+   if (path[start] == '\0')
+      path[--start] = '/';
+   const size_t length = sizeof(path) - 1 - start;
+   if (!buffer) {
+      buffer = malloc(size > length ? size : length + 1);
+      if (!buffer)
+         return NULL;
+   } else if (size <= length) {
+      errno = ERANGE;
+      return NULL;
+   }
+   memcpy(buffer, path + start, length + 1);
+   return buffer;
+}
+
 /* ---- the *at family --------------------------------------------------------- */
 
 int

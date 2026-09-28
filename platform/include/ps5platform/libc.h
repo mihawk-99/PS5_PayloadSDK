@@ -132,6 +132,11 @@ struct hostent *ps5_gethostbyaddr(const void *address, unsigned int length, int 
 struct if_nameindex *ps5_if_nameindex(void);
 void ps5_if_freenameindex(struct if_nameindex *list);
 
+/* The working directory, found by walking up from "." (libc's getcwd faults
+ * for a title: the __getcwd it calls is only in libkernel_sys). NULL buffer:
+ * malloc'd, of at least size bytes. */
+char *ps5_getcwd(char *buffer, size_t size);
+
 /* Directory streams through getdents. */
 DIR *ps5_opendir(const char *path);
 DIR *ps5_fdopendir(int fd);
