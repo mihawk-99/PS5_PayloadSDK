@@ -12,6 +12,7 @@
  */
 #define _GNU_SOURCE 1
 
+#include "ps5platform/exec.h"
 #include "ps5platform/kernel.h"
 #include "ps5platform/probe.h"
 
@@ -1151,6 +1152,83 @@ probe_jit_api(struct probe *p)
        (unsigned)map_result);
 }
 
+/* ---- executable memory by pointer (ps5_exec_allocate) ---------------------- */
+
+/* Past the 128 regions the pointer form once kept: 2,000 blocks of 4 KiB near
+ * this code (Dolphin takes one for each vertex format a game draws with) and
+ * 300 regions of 64 KiB, each run, with the time an allocation takes; and a
+ * block freed after execute was taken away from it runs when its page is
+ * handed out again. */
+static void
+probe_exec_pointer(struct probe *p)
+{
+   enum { BLOCKS = 2000, REGIONS = 300 };
+   static uint8_t *block[BLOCKS];
+   static uint8_t *region[REGIONS];
+   const uintptr_t anchor = (uintptr_t)(void *)&probe_exec_pointer;
+   uint64_t live_before = 0;
+   ps5_exec_live(&live_before, NULL);
+   unsigned handed = 0, wrong = 0;
+   uint64_t t = sceKernelReadTsc();
+   for (unsigned i = 0; i < BLOCKS; i++)
+      handed += (block[i] = ps5_exec_allocate(4096, anchor)) != NULL;
+   const uint64_t blocks_ns = ns_since(p, t);
+   for (unsigned i = 0; i < BLOCKS; i++)
+      if (block[i])
+         write_return(block[i], i);
+   for (unsigned i = 0; i < BLOCKS; i++)
+      wrong += block[i] && call(block[i]) != i;
+   uint64_t live = 0;
+   ps5_exec_live(&live, NULL);
+   say(p, "exec_pointer blocks=%u/%u wrong=%u live_regions=%llu ns_each=%llu", handed, BLOCKS, wrong,
+       (unsigned long long)(live - live_before), (unsigned long long)(blocks_ns / BLOCKS));
+   check(p, handed == BLOCKS && wrong == 0,
+         "2000 blocks of 4 KiB by pointer near the code, each runs its own code");
+   unsigned placed = 0, region_wrong = 0;
+   t = sceKernelReadTsc();
+   for (unsigned i = 0; i < REGIONS; i++)
+      placed += (region[i] = ps5_exec_allocate(64 * KIB, anchor)) != NULL;
+   const uint64_t regions_ns = ns_since(p, t);
+   for (unsigned i = 0; i < REGIONS; i++)
+      if (region[i]) {
+         write_return(region[i] + 64 * KIB - 64, i);
+         region_wrong += call(region[i] + 64 * KIB - 64) != i;
+      }
+   say(p, "exec_pointer regions=%u/%u wrong=%u ns_each=%llu", placed, REGIONS, region_wrong,
+       (unsigned long long)(regions_ns / REGIONS));
+   check(p, placed == REGIONS && region_wrong == 0,
+         "300 regions of 64 KiB by pointer near the code, each runs its own code");
+   unsigned released = 0;
+   t = sceKernelReadTsc();
+   for (unsigned i = 0; i < BLOCKS; i++)
+      released += block[i] && ps5_exec_release(block[i]) == 0;
+   for (unsigned i = 0; i < REGIONS; i++)
+      released += region[i] && ps5_exec_release(region[i]) == 0;
+   const uint64_t release_ns = ns_since(p, t);
+   /* A block whose execute was taken away, freed and handed out again. */
+   uint8_t *const first = ps5_exec_allocate(4096, anchor);
+   uint8_t *const second = ps5_exec_allocate(4096, anchor);
+   const int32_t rw = first ? sceKernelMprotect(first, 16 * KIB, PROT_RW) : -1;
+   const int freed = first ? ps5_exec_release(first) : -1;
+   uint8_t *const again = ps5_exec_allocate(4096, anchor);
+   bool runs = false;
+   if (again && again == first) {
+      write_return(again, 4242);
+      runs = call(again) == 4242;
+   }
+   if (again)
+      ps5_exec_release(again);
+   if (second)
+      ps5_exec_release(second);
+   ps5_exec_live(&live, NULL);
+   say(p, "exec_pointer released=%u release_ns_each=%llu reuse_rw=0x%08x reuse_freed=%d same_page=%d "
+          "reuse_runs=%d live_after=%llu",
+       released, (unsigned long long)(release_ns / (BLOCKS + REGIONS)), (unsigned)rw, freed,
+       again == first, runs, (unsigned long long)(live - live_before));
+   check(p, released == BLOCKS + REGIONS && rw == 0 && freed == 0 && runs && live == live_before,
+         "a block freed read-write runs when its page is handed out again, and all of it is freed");
+}
+
 int
 ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
 {
@@ -1167,6 +1245,7 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
    probe_concurrent(&p);
    probe_faults(&p);
    probe_reuse(&p);
+   probe_exec_pointer(&p);
    probe_page_views(&p);
    if (flags & PS5_PROBE_LARGE)
       probe_large(&p);
