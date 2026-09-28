@@ -26,8 +26,8 @@
 #include "ps5platform/kernel.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -42,14 +42,6 @@ void *mspace_memalign(mspace space, size_t alignment, size_t bytes);
 size_t mspace_usable_size(const void *pointer);
 void mspace_free(mspace space, void *pointer);
 
-/* libc's allocator, through the linker's --wrap. malloc_usable_size is weak:
- * a title that does not reference it links without its wrap. */
-void *__real_malloc(size_t bytes);
-void *__real_calloc(size_t count, size_t bytes);
-void *__real_realloc(void *pointer, size_t bytes);
-void __real_free(void *pointer);
-int __real_posix_memalign(void **out, size_t alignment, size_t bytes);
-__attribute__((weak)) size_t __real_malloc_usable_size(const void *pointer);
 
 #define HEAP_MAX_SEGMENTS 1024
 #define HEAP_UNIT PS5P_DIRECT_UNIT
@@ -278,187 +270,51 @@ ps5_heap_stats(struct ps5_heap_stats *stats)
    stats->libc_fallbacks = __atomic_load_n(&libc_fallbacks, __ATOMIC_RELAXED);
 }
 
-static void
-count_fallback(void)
+void
+ps5p_heap_count_fallback(void)
 {
    __atomic_fetch_add(&libc_fallbacks, 1, __ATOMIC_RELAXED);
 }
 
-/* ------------------------------------------------------------- the wraps */
+/* ------------------------------------------------------------ the heap */
 
 void *
-__wrap_malloc(size_t bytes)
+ps5_heap_malloc(size_t bytes)
 {
    const mspace space = title_heap();
-   void *const pointer = space ? mspace_malloc(space, bytes) : NULL;
-   if (pointer)
-      return pointer;
-   count_fallback();
-   return __real_malloc(bytes);
+   return space ? mspace_malloc(space, bytes) : NULL;
 }
 
 void *
-__wrap_calloc(size_t count, size_t bytes)
+ps5_heap_calloc(size_t count, size_t bytes)
 {
    const mspace space = title_heap();
-   void *const pointer = space ? mspace_calloc(space, count, bytes) : NULL;
-   if (pointer)
-      return pointer;
-   count_fallback();
-   return __real_calloc(count, bytes);
+   return space ? mspace_calloc(space, count, bytes) : NULL;
+}
+
+void *
+ps5_heap_memalign(size_t alignment, size_t bytes)
+{
+   const mspace space = title_heap();
+   return space ? mspace_memalign(space, alignment, bytes) : NULL;
+}
+
+void *
+ps5_heap_realloc(void *pointer, size_t bytes)
+{
+   return pointer ? mspace_realloc(any_arena(), pointer, bytes) : ps5_heap_malloc(bytes);
 }
 
 void
-__wrap_free(void *pointer)
+ps5_heap_free(void *pointer)
 {
-   if (!pointer)
-      return;
-   if (ps5_heap_owns(pointer))
+   if (pointer)
       mspace_free(any_arena(), pointer);
-   else
-      __real_free(pointer);
 }
 
 size_t
-__wrap_malloc_usable_size(const void *pointer)
+ps5_heap_usable_size(const void *pointer)
 {
-   if (!pointer)
-      return 0;
-   if (ps5_heap_owns(pointer))
-      return mspace_usable_size(pointer);
-   return __real_malloc_usable_size ? __real_malloc_usable_size(pointer) : 0;
+   return pointer ? mspace_usable_size(pointer) : 0;
 }
 
-void *
-__wrap_realloc(void *pointer, size_t bytes)
-{
-   if (!pointer)
-      return __wrap_malloc(bytes);
-   /* FreeBSD's realloc gives a zero-size request a minimum-size object. */
-   if (bytes == 0)
-      bytes = 1;
-   if (ps5_heap_owns(pointer)) {
-      void *const moved = mspace_realloc(any_arena(), pointer, bytes);
-      if (moved)
-         return moved;
-      /* Direct memory is exhausted: move the block to libc. */
-      void *const copy = __real_malloc(bytes);
-      if (!copy)
-         return NULL;
-      count_fallback();
-      const size_t kept = mspace_usable_size(pointer);
-      memcpy(copy, pointer, kept < bytes ? kept : bytes);
-      mspace_free(any_arena(), pointer);
-      return copy;
-   }
-   void *const moved = __real_realloc(pointer, bytes);
-   if (moved || !__real_malloc_usable_size)
-      return moved;
-   /* libc's heap is exhausted: move its block to the title heap. */
-   const mspace space = title_heap();
-   void *const copy = space ? mspace_malloc(space, bytes) : NULL;
-   if (!copy)
-      return NULL;
-   const size_t kept = __real_malloc_usable_size(pointer);
-   memcpy(copy, pointer, kept < bytes ? kept : bytes);
-   __real_free(pointer);
-   return copy;
-}
-
-void *
-__wrap_reallocf(void *pointer, size_t bytes)
-{
-   void *const moved = __wrap_realloc(pointer, bytes);
-   if (!moved)
-      __wrap_free(pointer);
-   return moved;
-}
-
-void *
-__wrap_reallocarray(void *pointer, size_t count, size_t bytes)
-{
-   if (bytes != 0 && count > SIZE_MAX / bytes) {
-      errno = ENOMEM;
-      return NULL;
-   }
-   return __wrap_realloc(pointer, count * bytes);
-}
-
-int
-__wrap_posix_memalign(void **out, size_t alignment, size_t bytes)
-{
-   if (alignment < sizeof(void *) || (alignment & (alignment - 1)) != 0)
-      return EINVAL;
-   const mspace space = title_heap();
-   void *const pointer = space ? mspace_memalign(space, alignment, bytes) : NULL;
-   if (pointer) {
-      *out = pointer;
-      return 0;
-   }
-   count_fallback();
-   return __real_posix_memalign(out, alignment, bytes);
-}
-
-void *
-__wrap_aligned_alloc(size_t alignment, size_t bytes)
-{
-   void *pointer = NULL;
-   const int result =
-      __wrap_posix_memalign(&pointer, alignment < sizeof(void *) ? sizeof(void *) : alignment, bytes);
-   if (result != 0) {
-      errno = result;
-      return NULL;
-   }
-   return pointer;
-}
-
-void *
-__wrap_memalign(size_t alignment, size_t bytes)
-{
-   return __wrap_aligned_alloc(alignment, bytes);
-}
-
-/* libc's getdelim grows the caller's buffer with libc's realloc, which must
- * never see a title-heap block: this one grows it with the wrap. */
-ssize_t
-__wrap_getdelim(char **line, size_t *capacity, int delimiter, FILE *stream)
-{
-   if (!line || !capacity || !stream) {
-      errno = EINVAL;
-      return -1;
-   }
-   if (!*line)
-      *capacity = 0;
-   size_t length = 0;
-   for (;;) {
-      const int c = fgetc(stream);
-      if (c == EOF) {
-         if (length == 0 || ferror(stream))
-            return -1;
-         break;
-      }
-      if (length + 2 > *capacity) {
-         size_t grown = *capacity < 64 ? 128 : *capacity * 2;
-         if (grown > (size_t)SSIZE_MAX) {
-            errno = EOVERFLOW;
-            return -1;
-         }
-         char *const moved = __wrap_realloc(*line, grown);
-         if (!moved)
-            return -1;
-         *line = moved;
-         *capacity = grown;
-      }
-      (*line)[length++] = (char)c;
-      if (c == (unsigned char)delimiter)
-         break;
-   }
-   (*line)[length] = '\0';
-   return (ssize_t)length;
-}
-
-ssize_t
-__wrap_getline(char **line, size_t *capacity, FILE *stream)
-{
-   return __wrap_getdelim(line, capacity, '\n', stream);
-}

@@ -68,6 +68,16 @@ struct ps5_heap_stats {
 
 void ps5_heap_stats(struct ps5_heap_stats *stats);
 
+/* The heap itself, for a title with an allocator of its own: NULL when direct
+ * memory refuses, with no fallback. realloc, free and usable_size take the
+ * heap's blocks only (ps5_heap_owns). */
+void *ps5_heap_malloc(size_t bytes);
+void *ps5_heap_calloc(size_t count, size_t bytes);
+void *ps5_heap_memalign(size_t alignment, size_t bytes);
+void *ps5_heap_realloc(void *pointer, size_t bytes);
+void ps5_heap_free(void *pointer);
+size_t ps5_heap_usable_size(const void *pointer);
+
 /* Whether a pointer is the heap's. */
 bool ps5_heap_owns(const void *pointer);
 
