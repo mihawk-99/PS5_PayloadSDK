@@ -31,6 +31,7 @@ extern int host_empty_decimal_point;
 #include <stdlib.h>
 #include <langinfo.h>
 #include <pwd.h>
+#include <netdb.h>
 #include <string.h>
 #include <sys/times.h>
 #include <sys/mman.h>
@@ -491,6 +492,11 @@ test_libc(void)
          "libc: times answers in clock ticks");
    check(ps5_getpwuid(0) == NULL, "libc: getpwuid finds no user");
    check(ps5_gethostbyaddr("\x7f\0\0\1", 4, 2) == NULL, "libc: gethostbyaddr finds no host");
+   check(ps5_gethostbyname("localhost") == NULL, "libc: gethostbyname finds no host");
+   char host[16] = "x", service[16] = "y";
+   check(ps5_getnameinfo("", 16, host, sizeof(host), service, sizeof(service), 0) == EAI_FAIL &&
+             !host[0] && !service[0],
+         "libc: getnameinfo is refused as getaddrinfo is");
    struct passwd entry, *found = &entry;
    char entry_buffer[256];
    check(ps5_getpwuid_r(getuid(), &entry, entry_buffer, sizeof(entry_buffer), &found) == 0 && found == NULL,

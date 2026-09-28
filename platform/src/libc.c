@@ -382,6 +382,27 @@ ps5_gethostbyaddr(const void *address, unsigned int length, int type)
    return NULL;
 }
 
+struct hostent *
+ps5_gethostbyname(const char *name)
+{
+   (void)name;
+   return NULL;
+}
+
+int
+ps5_getnameinfo(const void *address, unsigned int length, char *host, unsigned int host_size,
+                char *service, unsigned int service_size, int flags)
+{
+   (void)address;
+   (void)length;
+   (void)flags;
+   if (host && host_size)
+      host[0] = '\0';
+   if (service && service_size)
+      service[0] = '\0';
+   return EAI_FAIL;
+}
+
 struct if_nameindex *
 ps5_if_nameindex(void)
 {

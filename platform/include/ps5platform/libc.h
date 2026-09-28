@@ -19,7 +19,7 @@
  *                          libkernel_sys): they fault
  *   opendir and its family exported, but refused to a title; enumeration
  *                          goes through getdents
- *   getaddrinfo, freeaddrinfo
+ *   getaddrinfo, freeaddrinfo, getnameinfo, gethostbyname
  *                          routed by the SDK to a module titles do not load
  *   qsort_r, mkstemps, openlog, uname (__xuname), regcomp, regexec,
  *   regfree, regerror, __assert, __memset_chk
@@ -129,6 +129,9 @@ int ps5_getaddrinfo(const char *node, const char *service, const struct addrinfo
                     struct addrinfo **result);
 void ps5_freeaddrinfo(struct addrinfo *info);
 struct hostent *ps5_gethostbyaddr(const void *address, unsigned int length, int type);
+struct hostent *ps5_gethostbyname(const char *name);
+int ps5_getnameinfo(const void *address, unsigned int length, char *host, unsigned int host_size,
+                    char *service, unsigned int service_size, int flags);
 struct if_nameindex *ps5_if_nameindex(void);
 void ps5_if_freenameindex(struct if_nameindex *list);
 
