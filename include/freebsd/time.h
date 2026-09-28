@@ -95,8 +95,11 @@ typedef	__pid_t		pid_t;
 #endif
 #endif
 
-/* These macros are also in sys/time.h. */
-#if !defined(CLOCK_REALTIME) && __POSIX_VISIBLE >= 200112
+/* These macros are also in sys/time.h. The clocks and TIMER_ABSTIME are
+ * POSIX.1b (1993), as clock_gettime is: visible from 199309, as FreeBSD's own
+ * sys/_clock_id.h has them, so code that asks for _POSIX_C_SOURCE 199309 (such
+ * as libretro-common's rthreads) finds CLOCK_REALTIME. */
+#if !defined(CLOCK_REALTIME) && __POSIX_VISIBLE >= 199309
 #define CLOCK_REALTIME	0
 #ifdef __BSD_VISIBLE
 #define CLOCK_VIRTUAL	1
@@ -113,14 +116,14 @@ typedef	__pid_t		pid_t;
 #define CLOCK_SECOND	13		/* FreeBSD-specific. */
 #define CLOCK_THREAD_CPUTIME_ID	14
 #define	CLOCK_PROCESS_CPUTIME_ID	15
-#endif /* !defined(CLOCK_REALTIME) && __POSIX_VISIBLE >= 200112 */
+#endif /* !defined(CLOCK_REALTIME) && __POSIX_VISIBLE >= 199309 */
 
-#if !defined(TIMER_ABSTIME) && __POSIX_VISIBLE >= 200112
+#if !defined(TIMER_ABSTIME) && __POSIX_VISIBLE >= 199309
 #if __BSD_VISIBLE
 #define TIMER_RELTIME	0x0	/* relative timer */
 #endif
 #define TIMER_ABSTIME	0x1	/* absolute timer */
-#endif /* !defined(TIMER_ABSTIME) && __POSIX_VISIBLE >= 200112 */
+#endif /* !defined(TIMER_ABSTIME) && __POSIX_VISIBLE >= 199309 */
 
 struct tm {
 	int	tm_sec;		/* seconds after the minute [0-60] */
