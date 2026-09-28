@@ -160,6 +160,10 @@ float ps5_strtof_l(const char *s, char **end, void *locale);
  * plain counterpart does. The locale arguments are locale_t's, the catalogues
  * nl_catd's. */
 struct lconv *ps5_localeconv_l(void *locale);
+/* The item's string in the C locale, "" for one it lacks; item is an
+ * nl_item. */
+char *ps5_nl_langinfo(int item);
+char *ps5_nl_langinfo_l(int item, void *locale);
 long long ps5_strtoll_l(const char *s, char **end, int base, void *locale);
 unsigned long long ps5_strtoull_l(const char *s, char **end, int base, void *locale);
 long double ps5_strtold_l(const char *s, char **end, void *locale);

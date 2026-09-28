@@ -29,6 +29,7 @@ extern int host_empty_decimal_point;
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <langinfo.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -850,6 +851,11 @@ test_posix(void)
 
    char *end = NULL;
    check(ps5_strtoll_l("-42z", &end, 10, c_locale) == -42 && *end == 'z', "strtoll_l");
+   check(strcmp(ps5_nl_langinfo(RADIXCHAR), ".") == 0 && strcmp(ps5_nl_langinfo(THOUSEP), "") == 0 &&
+            strcmp(ps5_nl_langinfo(CODESET), "US-ASCII") == 0 &&
+            strcmp(ps5_nl_langinfo_l(MON_12, c_locale), "December") == 0 &&
+            strcmp(ps5_nl_langinfo(-1), "") == 0,
+         "nl_langinfo answers for the C locale");
    char formatted[32];
    check(ps5_snprintf_l(formatted, sizeof(formatted), c_locale, "%d:%.1f", 7, 2.5) == 5 &&
             strcmp(formatted, "7:2.5") == 0,

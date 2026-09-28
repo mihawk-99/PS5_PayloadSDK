@@ -19,6 +19,7 @@
 #include "ps5platform/libc.h"
 
 #include <errno.h>
+#include <langinfo.h>
 #include <limits.h>
 #include <locale.h>
 #include <stdarg.h>
@@ -75,6 +76,63 @@ ps5_localeconv_l(void *locale)
       ready = 1;
    }
    return &c_conventions;
+}
+
+/* The C locale's answers, as FreeBSD's C locale gives them; an item it does
+ * not have is "". No system module exports nl_langinfo (SPIRV-Cross reads
+ * RADIXCHAR to print shader constants). By name, since a host's items number
+ * differently. */
+char *
+ps5_nl_langinfo_l(int item, void *locale)
+{
+   static const char *const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+   static const char *const abdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+   static const char *const months[] = {"January", "February", "March",     "April",   "May",      "June",
+                                        "July",    "August",   "September", "October", "November", "December"};
+   static const char *const abmonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+   (void)locale;
+
+   switch (item) {
+   case CODESET: return (char *)"US-ASCII";
+   case D_T_FMT: return (char *)"%a %b %e %H:%M:%S %Y";
+   case D_FMT: return (char *)"%m/%d/%y";
+   case T_FMT: return (char *)"%H:%M:%S";
+   case T_FMT_AMPM: return (char *)"%I:%M:%S %p";
+   case AM_STR: return (char *)"AM";
+   case PM_STR: return (char *)"PM";
+   case RADIXCHAR: return (char *)".";
+   case YESEXPR: return (char *)"^[yY]";
+   case NOEXPR: return (char *)"^[nN]";
+#ifdef YESSTR
+   case YESSTR: return (char *)"yes";
+   case NOSTR: return (char *)"no";
+#endif
+#ifdef D_MD_ORDER
+   case D_MD_ORDER: return (char *)"md";
+#endif
+   default: break;
+   }
+   if (item >= DAY_1 && item <= DAY_7)
+      return (char *)days[item - DAY_1];
+   if (item >= ABDAY_1 && item <= ABDAY_7)
+      return (char *)abdays[item - ABDAY_1];
+   if (item >= MON_1 && item <= MON_12)
+      return (char *)months[item - MON_1];
+   if (item >= ABMON_1 && item <= ABMON_12)
+      return (char *)abmonths[item - ABMON_1];
+#ifdef ALTMON_1
+   if (item >= ALTMON_1 && item <= ALTMON_12)
+      return (char *)months[item - ALTMON_1];
+#endif
+   /* THOUSEP, CRNCYSTR, the eras and alternative digits, and anything else. */
+   return (char *)"";
+}
+
+char *
+ps5_nl_langinfo(int item)
+{
+   return ps5_nl_langinfo_l(item, NULL);
 }
 
 long long
