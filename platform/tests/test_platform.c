@@ -508,6 +508,20 @@ test_libc(void)
       fclose(scratch);
    unsetenv("TMPDIR");
    check(rmdir(temporary) == 0, "libc: tmpfile left no file behind");
+   char stem[] = "/tmp/ps5-platform-mkstemp-XXXXXX";
+   const int made = ps5_mkstemp(stem);
+   check(made >= 0 && strcmp(stem + strlen(stem) - 6, "XXXXXX") != 0, "libc: mkstemp names and opens");
+   check(!ps5_isatty(made) && errno == ENOTTY, "libc: isatty finds no terminal");
+   char target[32];
+   check(ps5_readlink(stem, target, sizeof(target)) == -1 && errno == EINVAL,
+         "libc: readlink finds a file is no link");
+   check(ps5_readlink("/no/such/path", target, sizeof(target)) == -1 && errno == ENOENT,
+         "libc: readlink of a missing path");
+   check(ps5_link(stem, "/tmp/ps5-platform-link") == -1 && ps5_symlink(stem, "/tmp/ps5-platform-link") == -1,
+         "libc: link and symlink are refused");
+   check(ps5_fchown(made, 0, 0) == -1 && errno == EPERM, "libc: fchown is not permitted");
+   close(made);
+   unlink(stem);
    char host[16] = "x", service[16] = "y";
    check(ps5_getnameinfo("", 16, host, sizeof(host), service, sizeof(service), 0) == EAI_FAIL &&
              !host[0] && !service[0],

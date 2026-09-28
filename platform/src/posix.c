@@ -84,6 +84,60 @@ ps5_mkstemps(char *path_template, int suffix_length)
    return -1;
 }
 
+int
+ps5_mkstemp(char *path_template)
+{
+   return ps5_mkstemps(path_template, 0);
+}
+
+/* ---------------------------------------- terminals, links and file owners */
+
+int
+ps5_isatty(int fd)
+{
+   errno = fcntl(fd, F_GETFD) == -1 ? EBADF : ENOTTY;
+   return 0;
+}
+
+int
+ps5_link(const char *existing, const char *name)
+{
+   (void)existing;
+   (void)name;
+   errno = EOPNOTSUPP;
+   return -1;
+}
+
+int
+ps5_symlink(const char *target, const char *name)
+{
+   (void)target;
+   (void)name;
+   errno = EPERM;
+   return -1;
+}
+
+ssize_t
+ps5_readlink(const char *path, char *buffer, size_t size)
+{
+   (void)buffer;
+   (void)size;
+   struct stat status;
+   if (lstat(path, &status) != 0)
+      return -1;
+   errno = EINVAL;
+   return -1;
+}
+
+int
+ps5_fchown(int fd, uid_t owner, gid_t group)
+{
+   (void)owner;
+   (void)group;
+   errno = fcntl(fd, F_GETFD) == -1 ? EBADF : EPERM;
+   return -1;
+}
+
 /* ------------------------------------------------------------------ tmpfile */
 
 /* A file with no name, removed as it is created: in $TMPDIR, or else in tmp/ in

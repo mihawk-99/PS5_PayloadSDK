@@ -11,7 +11,8 @@
  *   gmtime_r, localtime_r, utimensat, futimens, dirfd, clock_nanosleep,
  *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex, strcasestr,
  *   memccpy, times, sockatmark, getpwuid, gethostbyaddr, tmpfile,
- *   if_nametoindex, if_indextoname
+ *   if_nametoindex, if_indextoname, mkstemp, isatty, link, symlink, readlink,
+ *   fchown
  *                          no system module exports them
  *   openat, unlinkat, fchmodat, fstatat, mkdirat, renameat
  *                          only libkernel_sys exports them, which titles do
@@ -172,6 +173,17 @@ int ps5_mkstemps(char *path_template, int suffix_length);
 /* An unnamed read-write file, removed as it is created: in $TMPDIR, or in the
  * title's own /app0/tmp (made 0777). */
 FILE *ps5_tmpfile(void);
+int ps5_mkstemp(char *path_template);
+
+/* A title has no terminals, no links and no users to give a file to: isatty
+ * answers no terminal (ENOTTY, or EBADF for a closed descriptor), link and
+ * symlink are refused as on a file system without them, readlink finds that an
+ * existing path is no link (EINVAL), and fchown is not permitted (EPERM). */
+int ps5_isatty(int fd);
+int ps5_link(const char *existing, const char *name);
+int ps5_symlink(const char *target, const char *name);
+ssize_t ps5_readlink(const char *path, char *buffer, size_t size);
+int ps5_fchown(int fd, uid_t owner, gid_t group);
 
 /* The exported syslog takes no identity: opening the log changes nothing. */
 void ps5_openlog(const char *ident, int option, int facility);
