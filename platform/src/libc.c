@@ -10,6 +10,7 @@
 #include "at.h"
 #include "ps5platform/kernel.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <net/if.h>
@@ -184,6 +185,20 @@ ps5_access(const char *path, int mode)
       close(fd);
    }
    return 0;
+}
+
+char *
+ps5_strcasestr(const char *haystack, const char *needle)
+{
+   for (;; haystack++) {
+      size_t i = 0;
+      while (needle[i] && tolower((unsigned char)haystack[i]) == tolower((unsigned char)needle[i]))
+         i++;
+      if (!needle[i])
+         return (char *)haystack;
+      if (!*haystack)
+         return NULL;
+   }
 }
 
 int

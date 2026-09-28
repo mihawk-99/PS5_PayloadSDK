@@ -9,7 +9,7 @@
  * by one of our titles.
  *
  *   gmtime_r, localtime_r, utimensat, futimens, dirfd, clock_nanosleep,
- *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex
+ *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex, strcasestr
  *                          no system module exports them
  *   openat, unlinkat, fchmodat, fstatat, mkdirat, renameat
  *                          only libkernel_sys exports them, which titles do
@@ -77,6 +77,10 @@ uint32_t ps5_arc4random_uniform(uint32_t bound);
  * room. */
 int ps5_statvfs(const char *path, struct statvfs *result);
 int ps5_fstatvfs(int fd, struct statvfs *result);
+
+/* The first occurrence of needle in haystack, ignoring the case of ASCII
+ * letters (the locale is "C"), as FreeBSD's strcasestr. */
+char *ps5_strcasestr(const char *haystack, const char *needle);
 
 /* A title has no user database: every lookup finds no entry (0, *result
  * NULL), as POSIX answers for a user it does not know. */

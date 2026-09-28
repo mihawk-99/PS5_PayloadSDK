@@ -476,6 +476,10 @@ test_libc(void)
    check(ps5_statvfs("/", &space) == 0 && space.f_bavail * space.f_frsize == (16ull << 30),
          "libc: statvfs answers 16 GiB free");
    check(ps5_statvfs("/no/such/path", &space) == -1, "libc: statvfs of a missing path fails");
+   const char *text = "Commodore 64 disk.D64";
+   check(ps5_strcasestr(text, ".d64") == text + 17 && ps5_strcasestr(text, "") == text &&
+             ps5_strcasestr(text, "c128") == NULL && ps5_strcasestr("", "a") == NULL,
+         "libc: strcasestr finds a needle regardless of case");
    struct passwd entry, *found = &entry;
    char entry_buffer[256];
    check(ps5_getpwuid_r(getuid(), &entry, entry_buffer, sizeof(entry_buffer), &found) == 0 && found == NULL,
