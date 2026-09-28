@@ -48,6 +48,10 @@ int ps5p_map_placed(int64_t direct_start, size_t bytes, uintptr_t hint, int prot
  * the GPU window. */
 int ps5p_reserve_placed(size_t bytes, uintptr_t hint, size_t alignment, int no_place, void **address);
 
+/* Whether every byte of [base, +bytes) is within PS5P_NEAR_REACH of the anchor,
+ * outside the GPU window and above the lowest 16 MiB. */
+bool ps5p_near_enough(uintptr_t base, size_t bytes, uintptr_t anchor);
+
 /* Reserves bytes of address space whose every byte is within PS5P_NEAR_REACH of
  * the anchor, outside the GPU window; the hint, when given and suitable, first. */
 int ps5p_reserve_near(size_t bytes, uintptr_t anchor, uintptr_t hint, int no_place, void **address);

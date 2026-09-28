@@ -76,7 +76,10 @@ void ps5_exec_live(uint64_t *regions, uint64_t *bytes);
  * region is read, write and execute, within +/-2 GiB of the anchor when one is
  * given (the core's own code, so calls between the two use 32-bit
  * displacements), and anywhere outside the GPU window otherwise. The layer
- * keeps the region, so the caller holds only its address. NULL on failure. */
+ * keeps the region, so the caller holds only its address. There is no limit
+ * on how many are live, as there is none for mmap: a request under 64 KiB is
+ * a block of whole 16 KiB pages in a shared arena, zeroed, and one of 64 KiB
+ * or more a region of its own. NULL on failure. */
 void *ps5_exec_allocate(size_t bytes, uintptr_t anchor);
 /* Frees what ps5_exec_allocate returned. 0, or PS5_EXEC_BAD_REQUEST for an
  * address it did not return. */

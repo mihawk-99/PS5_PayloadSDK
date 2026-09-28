@@ -73,8 +73,8 @@ ps5p_reserve_placed(size_t bytes, uintptr_t hint, size_t alignment, int no_place
    return last;
 }
 
-static bool
-near_enough(uintptr_t base, size_t bytes, uintptr_t anchor)
+bool
+ps5p_near_enough(uintptr_t base, size_t bytes, uintptr_t anchor)
 {
    if (base < PS5P_LOWEST || !ps5p_outside_gpu_window(base, bytes))
       return false;
@@ -88,7 +88,7 @@ try_reserve(uintptr_t at, size_t bytes, uintptr_t anchor, void **address)
    void *placed = (void *)at;
    if (sceKernelReserveVirtualRange(&placed, bytes, 0, PS5P_DIRECT_UNIT) != 0)
       return false;
-   if (near_enough((uintptr_t)placed, bytes, anchor)) {
+   if (ps5p_near_enough((uintptr_t)placed, bytes, anchor)) {
       *address = placed;
       return true;
    }
@@ -101,19 +101,19 @@ ps5p_reserve_near(size_t bytes, uintptr_t anchor, uintptr_t hint, int no_place, 
 {
    if (bytes >= PS5P_NEAR_REACH)
       return no_place;
-   if (hint != 0 && near_enough(hint, bytes, anchor) && try_reserve(hint, bytes, anchor, address))
+   if (hint != 0 && ps5p_near_enough(hint, bytes, anchor) && try_reserve(hint, bytes, anchor, address))
       return 0;
    const uintptr_t origin = anchor / PS5P_NEAR_GRANULE * PS5P_NEAR_GRANULE;
    const unsigned steps = (unsigned)(PS5P_NEAR_REACH / PS5P_NEAR_GRANULE);
    /* Above the anchor first, then below, nearest first on each side. */
    for (unsigned step = 1; step <= steps; step++) {
       const uintptr_t above = origin + step * PS5P_NEAR_GRANULE;
-      if (near_enough(above, bytes, anchor) && try_reserve(above, bytes, anchor, address))
+      if (ps5p_near_enough(above, bytes, anchor) && try_reserve(above, bytes, anchor, address))
          return 0;
       const uintptr_t distance = step * PS5P_NEAR_GRANULE + ps5p_round_up(bytes, PS5P_NEAR_GRANULE);
       if (origin > distance) {
          const uintptr_t below = origin - distance;
-         if (near_enough(below, bytes, anchor) && try_reserve(below, bytes, anchor, address))
+         if (ps5p_near_enough(below, bytes, anchor) && try_reserve(below, bytes, anchor, address))
             return 0;
       }
    }

@@ -189,6 +189,87 @@ test_exec_pointer(void)
    check(ps5_exec_release(anywhere) == 0 && nothing_live(), "pointer: and freed");
 }
 
+/* No limit on how many are live. Dolphin takes 4 KiB of code for each vertex
+ * format a game draws with, and a table of 128 regions ran out between a
+ * mission and the main menu. Small blocks share arenas, whole 16 KiB pages
+ * each; large requests are regions of their own. */
+static void
+test_exec_many(void)
+{
+   enum { BLOCKS = 1000, REGIONS = 200 };
+   static uint8_t *block[BLOCKS];
+   static uint8_t *region[REGIONS];
+   const uintptr_t anchor = (uintptr_t)(void *)&test_exec_many;
+   unsigned handed = 0, placed = 0, zeroed = 0, runs = 0;
+   for (unsigned i = 0; i < BLOCKS; i++) {
+      block[i] = ps5_exec_allocate(4096, anchor);
+      if (!block[i])
+         continue;
+      handed++;
+      const uintptr_t at = (uintptr_t)block[i];
+      placed += at % 0x4000 == 0 && at + 0x7c000000ull >= anchor &&
+                at + 0x4000 <= anchor + 0x7c000000ull && outside_window(block[i], 0x4000);
+      bool clear = true;
+      for (unsigned b = 0; b < 0x4000; b++)
+         clear &= block[i][b] == 0;
+      zeroed += clear;
+      write_return(block[i], i);
+      runs += call(block[i]) == i;
+   }
+   check(handed == BLOCKS, "many: 1,000 blocks of 4 KiB, past the old limit of 128");
+   check(placed == BLOCKS, "many: each on 16 KiB pages of its own, within reach of the anchor");
+   check(zeroed == BLOCKS && runs == BLOCKS, "many: each zeroed, and its code runs");
+   unsigned intact = 0;
+   for (unsigned i = 0; i < BLOCKS; i++)
+      intact += block[i] && call(block[i]) == i;
+   check(intact == BLOCKS, "many: no block overlaps another");
+   uint64_t regions = 0;
+   ps5_exec_live(&regions, NULL);
+   check(regions <= (BLOCKS * 0x4000) / (4 << 20) + 1, "many: in a few shared arenas, not a region each");
+   check(ps5_exec_release(block[10] + 4096) == PS5_EXEC_BAD_REQUEST,
+         "many: an address inside a block is not one it returned");
+   check(ps5_exec_release(block[10]) == 0 && ps5_exec_release(block[10]) == PS5_EXEC_BAD_REQUEST,
+         "many: a block freed once, and refused the second time");
+   block[10] = NULL;
+   unsigned large = 0;
+   for (unsigned i = 0; i < REGIONS; i++) {
+      region[i] = ps5_exec_allocate(0x10000, anchor);
+      if (region[i]) {
+         write_return(region[i] + 0x10000 - 64, i);
+         large += call(region[i] + 0x10000 - 64) == i;
+      }
+   }
+   check(large == REGIONS, "many: 200 regions of 64 KiB, each of its own, past the old limit");
+   unsigned released = 0;
+   for (unsigned i = 0; i < REGIONS; i++)
+      released += ps5_exec_release(region[i]) == 0;
+   for (unsigned i = 0; i < BLOCKS; i++)
+      released += block[i] && ps5_exec_release(block[i]) == 0;
+   check(released == REGIONS + BLOCKS - 1 && nothing_live(), "many: all freed, nothing live");
+
+   /* A core that takes execute away from its block before freeing it (PPSSPP
+    * does) leaves the page runnable for the next block handed out there. */
+   uint8_t *const first = ps5_exec_allocate(4096, anchor);
+   uint8_t *const second = ps5_exec_allocate(4096, anchor);
+   sceKernelMprotect(first, 0x4000, PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE);
+   check(first && second && ps5_exec_release(first) == 0, "many: a read-write block freed");
+   uint8_t *const reused = ps5_exec_allocate(8000, anchor);
+   check(reused == first, "many: its page handed out again");
+   if (reused == first && reused) {
+      write_return(reused, 77);
+      check(call(reused) == 77, "many: and its code runs");
+   }
+   /* An anchor out of reach of the arena gets one of its own. */
+   const uintptr_t far_anchor = anchor + ((uintptr_t)8 << 30);
+   uint8_t *const far = ps5_exec_allocate(4096, far_anchor);
+   check(far && (uintptr_t)far + 0x7c000000ull >= far_anchor &&
+            (uintptr_t)far + 0x4000 <= far_anchor + 0x7c000000ull,
+         "many: a far anchor's block is within its reach");
+   check(ps5_exec_release(reused) == 0 && ps5_exec_release(second) == 0 &&
+            ps5_exec_release(far) == 0 && nothing_live(),
+         "many: and all of it freed");
+}
+
 static void
 test_exec_fixed(void)
 {
@@ -321,13 +402,25 @@ test_exec_unwinding(void)
 struct churn {
    unsigned cycles;
    unsigned failed;
+   bool blocks; /* through ps5_exec_allocate, small and large in turn */
 };
 
 static void *
 churn(void *argument)
 {
    struct churn *const c = argument;
-   for (unsigned i = 0; i < c->cycles; i++) {
+   for (unsigned i = 0; c->blocks && i < c->cycles; i++) {
+      const size_t bytes = i % 5 == 4 ? 0x20000 : 4096 * (1 + i % 4);
+      uint8_t *const at = ps5_exec_allocate(bytes, (uintptr_t)(void *)&churn);
+      if (!at) {
+         c->failed++;
+         continue;
+      }
+      write_return(at, i);
+      c->failed += call(at) != i;
+      c->failed += ps5_exec_release(at) != 0;
+   }
+   for (unsigned i = 0; !c->blocks && i < c->cycles; i++) {
       struct ps5_exec_request request = {.bytes = 0x10000 * (1 + i % 4)};
       struct ps5_exec_region region;
       if (ps5_exec_alloc(&request, &region) != 0) {
@@ -357,6 +450,17 @@ test_exec_threads(void)
       failed += work[t].failed;
    }
    check(failed == 0 && nothing_live(), "threads: 1,600 allocations on eight threads, counted back to zero");
+   for (unsigned t = 0; t < THREADS; t++) {
+      work[t] = (struct churn){.cycles = 400, .blocks = true};
+      pthread_create(&threads[t], NULL, churn, &work[t]);
+   }
+   failed = 0;
+   for (unsigned t = 0; t < THREADS; t++) {
+      pthread_join(threads[t], NULL);
+      failed += work[t].failed;
+   }
+   check(failed == 0 && nothing_live(),
+         "threads: 3,200 blocks and regions by pointer on eight threads, counted back to zero");
 }
 
 /* ---- shared memory ---------------------------------------------------------- */
@@ -1284,6 +1388,7 @@ main(void)
    fflush(stdout);
    test_exec_near();
    test_exec_pointer();
+   test_exec_many();
    test_exec_at();
    printf("%s\n", "test_exec_fixed");
    fflush(stdout);
