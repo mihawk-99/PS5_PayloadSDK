@@ -378,7 +378,7 @@ ps5_gethostbyaddr(const void *address, unsigned int length, int type)
    (void)address;
    (void)length;
    (void)type;
-   h_errno = HOST_NOT_FOUND;
+   /* h_errno is (*__h_errno()), which no system module exports either. */
    return NULL;
 }
 
