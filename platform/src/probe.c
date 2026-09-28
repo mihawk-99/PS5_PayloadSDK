@@ -13,7 +13,9 @@
 #define _GNU_SOURCE 1
 
 #include "ps5platform/exec.h"
+#include "ps5platform/heap.h"
 #include "ps5platform/kernel.h"
+#include "ps5platform/libc.h"
 #include "ps5platform/probe.h"
 
 #include <pthread.h>
@@ -1168,6 +1170,10 @@ probe_exec_pointer(struct probe *p)
    const uintptr_t anchor = (uintptr_t)(void *)&probe_exec_pointer;
    uint64_t live_before = 0;
    ps5_exec_live(&live_before, NULL);
+   int64_t direct_where_before = -1, direct_where_after = -1;
+   const size_t direct_before = available_direct(&direct_where_before);
+   struct ps5_heap_stats heap_before, heap_after;
+   ps5_heap_stats(&heap_before);
    unsigned handed = 0, wrong = 0;
    uint64_t t = sceKernelReadTsc();
    for (unsigned i = 0; i < BLOCKS; i++)
@@ -1221,6 +1227,12 @@ probe_exec_pointer(struct probe *p)
    if (second)
       ps5_exec_release(second);
    ps5_exec_live(&live, NULL);
+   const size_t direct_after = available_direct(&direct_where_after);
+   ps5_heap_stats(&heap_after);
+   say(p, "exec_pointer direct_before=%zu at 0x%llx direct_after=%zu at 0x%llx heap_mapped_before=%zu "
+          "heap_mapped_after=%zu",
+       direct_before, (unsigned long long)direct_where_before, direct_after,
+       (unsigned long long)direct_where_after, heap_before.mapped_bytes, heap_after.mapped_bytes);
    say(p, "exec_pointer released=%u release_ns_each=%llu reuse_rw=0x%08x reuse_freed=%d same_page=%d "
           "reuse_runs=%d live_after=%llu",
        released, (unsigned long long)(release_ns / (BLOCKS + REGIONS)), (unsigned)rw, freed,
@@ -1235,7 +1247,11 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
    struct probe p = {.log = log, .context = context, .tsc_hz = sceKernelGetTscFrequency()};
    const size_t flexible_start = available_flexible();
    const size_t direct_start = available_direct(NULL);
-   say(&p, "begin flags=0x%x", flags);
+   struct ps5_heap_stats heap_start, heap_end;
+   ps5_heap_stats(&heap_start);
+   unsigned stacks_live = 0, stacks_start = 0, stacks_end = 0;
+   ps5_thread_stacks(&stacks_live, &stacks_start);
+   say(&p, "begin flags=0x%x heap_mapped=%zu", flags, heap_start.mapped_bytes);
    probe_identity(&p);
    probe_map_exec(&p);
    probe_mprotect_exec(&p);
@@ -1258,10 +1274,20 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
       probe_full(&p, largest);
    const size_t flexible_end = available_flexible();
    const size_t direct_end = available_direct(NULL);
-   check(&p, flexible_end == flexible_start && direct_end == direct_start,
-         "the probe leaves direct and flexible memory as it found them");
-   say(&p, "end failures=%d flexible_start=%zu flexible_end=%zu direct_start=%zu direct_end=%zu",
-       p.failures, flexible_start, flexible_end, direct_start, direct_end);
+   /* The platform keeps the stacks of finished threads for its next ones
+    * (src/threads.c), so the threads the probe starts may leave some cached:
+    * a stack and a direct-memory unit each, at most. */
+   ps5_thread_stacks(&stacks_live, &stacks_end);
+   const size_t kept = stacks_end > stacks_start ? (size_t)(stacks_end - stacks_start) : 0;
+   check(&p,
+         flexible_end == flexible_start && direct_end <= direct_start &&
+            direct_start - direct_end <= kept * (PS5_THREAD_STACK_BYTES + PS5_KERNEL_DIRECT_ALIGNMENT),
+         "the probe leaves direct and flexible memory as it found them, apart from cached thread stacks");
+   ps5_heap_stats(&heap_end);
+   say(&p, "end failures=%d flexible_start=%zu flexible_end=%zu direct_start=%zu direct_end=%zu "
+           "heap_mapped=%zu stacks_cached=%u->%u",
+       p.failures, flexible_start, flexible_end, direct_start, direct_end, heap_end.mapped_bytes,
+       stacks_start, stacks_end);
    /* Last and optional: a refused import would stop the process here. */
    if (flags & PS5_PROBE_JIT_API)
       probe_jit_api(&p);
