@@ -401,3 +401,30 @@ host_klog_text(char *out, unsigned long size)
    snprintf(out, size, "%s", klog_text);
    pthread_mutex_unlock(&lock);
 }
+
+/* A thread's CPUs as the console's 64-bit mask, from the host's own. */
+int32_t
+scePthreadGetaffinity(pthread_t thread, uint64_t *mask)
+{
+   cpu_set_t set;
+   CPU_ZERO(&set);
+   if (pthread_getaffinity_np(thread, sizeof(set), &set) != 0)
+      return FAILED;
+   uint64_t result = 0;
+   for (int cpu = 0; cpu < 64; cpu++)
+      if (CPU_ISSET(cpu, &set))
+         result |= (uint64_t)1 << cpu;
+   *mask = result;
+   return 0;
+}
+
+int32_t
+scePthreadSetaffinity(pthread_t thread, uint64_t mask)
+{
+   cpu_set_t set;
+   CPU_ZERO(&set);
+   for (int cpu = 0; cpu < 64; cpu++)
+      if (mask & ((uint64_t)1 << cpu))
+         CPU_SET(cpu, &set);
+   return pthread_setaffinity_np(thread, sizeof(set), &set) == 0 ? 0 : REFUSED;
+}

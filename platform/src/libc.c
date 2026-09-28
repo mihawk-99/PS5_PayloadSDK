@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <net/if.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -171,6 +172,81 @@ ps5_sockatmark(int fd)
 {
    int mark = 0;
    return ioctl(fd, SIOCATMARK, &mark) == -1 ? -1 : mark != 0;
+}
+
+int
+ps5_accept4(int fd, struct sockaddr *address, unsigned int *length, int flags)
+{
+   if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)) {
+      errno = EINVAL;
+      return -1;
+   }
+   const int accepted = accept(fd, address, (socklen_t *)length);
+   if (accepted < 0)
+      return -1;
+   if (((flags & SOCK_CLOEXEC) && fcntl(accepted, F_SETFD, FD_CLOEXEC) == -1) ||
+       ((flags & SOCK_NONBLOCK) &&
+        fcntl(accepted, F_SETFL, fcntl(accepted, F_GETFL) | O_NONBLOCK) == -1)) {
+      const int error = errno;
+      close(accepted);
+      errno = error;
+      return -1;
+   }
+   return accepted;
+}
+
+int
+ps5_getpagesizes(size_t sizes[], int count)
+{
+   if (count < 0 || (!sizes && count != 0)) {
+      errno = EINVAL;
+      return -1;
+   }
+   if (!sizes)
+      return 1;
+   if (count == 0)
+      return 0;
+   sizes[0] = 0x4000;
+   return 1;
+}
+
+const struct in6_addr ps5_in6addr_any = IN6ADDR_ANY_INIT;
+
+/* A console error (0x8002xxxx) as the errno value it carries. */
+static int
+kernel_errno(int32_t result)
+{
+   return ((uint32_t)result & 0xffff0000u) == 0x80020000u ? (int)(result & 0xffff) : EINVAL;
+}
+
+int
+ps5_pthread_getaffinity_np(pthread_t thread, size_t size, void *set)
+{
+   if (!set || size == 0)
+      return EINVAL;
+   uint64_t mask = 0;
+   const int32_t result = scePthreadGetaffinity(thread, &mask);
+   if (result != 0)
+      return kernel_errno(result);
+   memset(set, 0, size);
+   memcpy(set, &mask, size < sizeof(mask) ? size : sizeof(mask));
+   return 0;
+}
+
+int
+ps5_pthread_setaffinity_np(pthread_t thread, size_t size, const void *set)
+{
+   if (!set || size == 0)
+      return EINVAL;
+   uint64_t mask = 0;
+   memcpy(&mask, set, size < sizeof(mask) ? size : sizeof(mask));
+   for (size_t i = sizeof(mask); i < size; i++)
+      if (((const unsigned char *)set)[i] != 0)
+         return EINVAL;
+   if (mask == 0)
+      return EINVAL;
+   const int32_t result = scePthreadSetaffinity(thread, mask);
+   return result == 0 ? 0 : kernel_errno(result);
 }
 
 int

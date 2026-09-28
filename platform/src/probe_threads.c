@@ -25,12 +25,14 @@
 
 #include "ps5platform/kernel.h"
 #endif
+#include "ps5platform/libc.h"
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define THREAD_PROBE_ASKED (2u * 1024u * 1024u)
 
@@ -323,6 +325,47 @@ thread_scheduling(struct thread_probe *p)
               created, (unsigned long long)all, cpus,
               policy >= 0 ? sched_get_priority_min(policy) : -1, set_result, reread_priority, new_policy,
               reread_result);
+   /* What a program asks the system about its CPUs and pages (RPCS3 sizes its
+    * thread pools and its protection by these). */
+   thread_say(p, "scheduling sysconf nprocessors_onln=%ld nprocessors_conf=%ld pagesize=%ld",
+              sysconf(_SC_NPROCESSORS_ONLN), sysconf(_SC_NPROCESSORS_CONF), sysconf(_SC_PAGESIZE));
+#if !defined(__linux__)
+   /* The affinity mask sizes pthread_getaffinity_np accepts, and the exported
+    * 64-bit form, read and set back unchanged. */
+   char sizes[160];
+   int written = snprintf(sizes, sizeof(sizes), "scheduling getaffinity_np");
+   static const size_t tried[] = {8, 16, 32, 64, 128};
+   for (unsigned i = 0; i < sizeof(tried) / sizeof(tried[0]); i++) {
+      unsigned char mask[128];
+      memset(mask, 0, sizeof(mask));
+      const int result = pthread_getaffinity_np(pthread_self(), tried[i], (cpuset_t *)(void *)mask);
+      uint64_t low = 0;
+      memcpy(&low, mask, sizeof(low));
+      if (written > 0 && written < (int)sizeof(sizes) - 32)
+         written += snprintf(sizes + written, sizeof(sizes) - (size_t)written, " size%zu=%d:%#llx", tried[i], result,
+                          (unsigned long long)low);
+   }
+   thread_say(p, "%s", sizes);
+   uint64_t sce_mask = 0;
+   const int32_t got_mask = scePthreadGetaffinity(pthread_self(), &sce_mask);
+   const int32_t set_mask = got_mask == 0 ? scePthreadSetaffinity(pthread_self(), sce_mask) : -1;
+   uint64_t again = 0;
+   const int32_t reread_mask = scePthreadGetaffinity(pthread_self(), &again);
+   thread_say(p, "scheduling scePthreadGetaffinity=%#x mask=%#llx set=%#x reread=%#x mask=%#llx",
+              (unsigned)got_mask, (unsigned long long)sce_mask, (unsigned)set_mask, (unsigned)reread_mask,
+              (unsigned long long)again);
+#endif
+   /* The platform layer's answer for FreeBSD's cpuset_t (32 bytes). */
+   unsigned char set[32];
+   memset(set, 0xff, sizeof(set));
+   const int got_set = ps5_pthread_getaffinity_np(pthread_self(), sizeof(set), set);
+   uint64_t set_low = 0;
+   memcpy(&set_low, set, sizeof(set_low));
+   const int put_set = got_set == 0 ? ps5_pthread_setaffinity_np(pthread_self(), sizeof(set), set) : -1;
+   size_t page_sizes[2] = {0, 0};
+   const int page_count = ps5_getpagesizes(page_sizes, 2);
+   thread_say(p, "scheduling platform getaffinity=%d mask=%#llx setaffinity=%d getpagesizes=%d:%zu", got_set,
+              (unsigned long long)set_low, put_set, page_count, page_sizes[0]);
 }
 
 int

@@ -15,9 +15,10 @@ ps5_platform_report(char *line, size_t size)
    struct ps5_shm_stats shm;
    ps5_shm_live(&shm);
    return snprintf(line, size,
-                   "platform exec=%llu/%lluMiB shm=%llu/%lluMiB views=%llu ranges=%llu/%lluMiB",
+                   "platform exec=%llu/%lluMiB shm=%llu/%lluMiB views=%llu ranges=%llu/%lluMiB committed=%lluMiB",
                    (unsigned long long)regions, (unsigned long long)(bytes >> 20),
                    (unsigned long long)shm.objects, (unsigned long long)(shm.object_bytes >> 20),
                    (unsigned long long)shm.views, (unsigned long long)shm.ranges,
-                   (unsigned long long)(shm.range_bytes >> 20));
+                   (unsigned long long)(shm.range_bytes >> 20),
+                   (unsigned long long)(shm.committed_bytes >> 20));
 }

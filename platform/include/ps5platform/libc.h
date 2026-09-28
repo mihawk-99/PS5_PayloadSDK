@@ -36,6 +36,11 @@
  *                          published through fclose and fflush wraps
  *   memfd_create           no system module exports it: libkernel's anonymous
  *                          shared memory object, as FreeBSD 13 builds it
+ *   accept4, getpagesizes, in6addr_any
+ *                          no system module exports them
+ *   pthread_getaffinity_np, pthread_setaffinity_np
+ *                          exported, but FreeBSD's cpuset_t is refused (ERANGE):
+ *                          the exported 64-bit mask form answers instead
  *
  * They carry a ps5_ prefix: a title that defined libc's own names would
  * export them, which the title converter refuses. Each consumer binds the
@@ -48,6 +53,7 @@
 #define PS5PLATFORM_LIBC_H
 
 #include <dirent.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -65,6 +71,8 @@ extern "C" {
 
 struct addrinfo;
 struct hostent;
+struct in6_addr;
+struct sockaddr;
 struct if_nameindex;
 struct passwd;
 struct tms;
@@ -103,6 +111,26 @@ clock_t ps5_times(struct tms *buffer);
 /* Whether the socket's read pointer is at the out-of-band mark, through
  * SIOCATMARK, as FreeBSD implements it. */
 int ps5_sockatmark(int fd);
+
+/* accept, then SOCK_CLOEXEC and SOCK_NONBLOCK applied to the new socket, as
+ * FreeBSD's accept4 does. */
+int ps5_accept4(int fd, struct sockaddr *address, unsigned int *length, int flags);
+
+/* The page sizes mappings use: the kernel's 16 KiB page, the one size a
+ * title's mappings are made of. As FreeBSD's getpagesizes: with no array and
+ * a count of 0, how many sizes there are; otherwise how many were stored. */
+int ps5_getpagesizes(size_t sizes[], int count);
+
+/* The IPv6 wildcard address (IN6ADDR_ANY_INIT). */
+extern const struct in6_addr ps5_in6addr_any;
+
+/* A thread's CPUs, as FreeBSD's pthread_getaffinity_np and
+ * pthread_setaffinity_np take them (a cpuset_t, or a set of another size),
+ * through the exported scePthreadGetaffinity and scePthreadSetaffinity and
+ * their 64-bit mask: CPU n is bit n. A set naming CPUs past 63, or none, is
+ * refused with EINVAL. Error numbers are returned, as pthread functions do. */
+int ps5_pthread_getaffinity_np(pthread_t thread, size_t size, void *set);
+int ps5_pthread_setaffinity_np(pthread_t thread, size_t size, const void *set);
 
 /* Makes the file at least offset + length bytes long with the bytes past its
  * end written as zeros, so the space is taken, not a hole; bytes already in

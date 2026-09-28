@@ -16,6 +16,7 @@
 #define PS5PLATFORM_KERNEL_H
 
 #include <stddef.h>
+#include <pthread.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -68,6 +69,9 @@ int32_t sceKernelJitMapSharedMemory(int fd, int protection, void **address);
 uint64_t sceKernelReadTsc(void);
 /* The CPU the calling thread runs on now. */
 int32_t sceKernelGetCurrentCpu(void);
+/* A thread's CPUs as a 64-bit mask, read and set. */
+int32_t scePthreadGetaffinity(pthread_t thread, uint64_t *mask);
+int32_t scePthreadSetaffinity(pthread_t thread, uint64_t mask);
 uint64_t sceKernelGetTscFrequency(void);
 
 /* The public PS4 SDK's version record: its size is set by the caller. */

@@ -32,6 +32,9 @@ extern int host_empty_decimal_point;
 #include <langinfo.h>
 #include <pwd.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 #include <string.h>
 #include <sys/times.h>
 #include <sys/mman.h>
@@ -83,7 +86,31 @@ nothing_live(void)
    unsigned stacks = 0, cached = 0;
    ps5_thread_stacks(&stacks, &cached);
    return regions == 0 && bytes == 0 && stats.objects == 0 && stats.views == 0 &&
-          stats.ranges == 0 && host_direct_allocations() == (long long)(stacks + cached);
+          stats.ranges == 0 && stats.committed_bytes == 0 &&
+          host_direct_allocations() == (long long)(stacks + cached);
+}
+
+/* The host's protection of the page at the address, from /proc/self/maps:
+ * "rw-", "---", or "" when nothing is mapped there. */
+static const char *
+host_protection(const void *address)
+{
+   static char protection[4];
+   protection[0] = 0;
+   FILE *maps = fopen("/proc/self/maps", "r");
+   if (!maps)
+      return protection;
+   unsigned long low, high;
+   char bits[5];
+   while (fscanf(maps, "%lx-%lx %4s%*[^\n]", &low, &high, bits) == 3) {
+      if ((uintptr_t)address >= low && (uintptr_t)address < high) {
+         memcpy(protection, bits, 3);
+         protection[3] = 0;
+         break;
+      }
+   }
+   fclose(maps);
+   return protection;
 }
 
 /* ---- executable regions ----------------------------------------------------- */
@@ -533,6 +560,61 @@ test_shm(void)
          "shm: a view of a destroyed object is refused");
 }
 
+/* Committed memory in a reserved range: 64 KiB units of direct memory, backed
+ * at their first commit, given back when decommitted whole. */
+static void
+test_vrange_commit(void)
+{
+   uint8_t *base = NULL;
+   check(ps5_vrange_reserve(1 << 20, NULL, 0x10000, (void **)&base) == 0, "commit: a range");
+   struct ps5_shm_stats stats;
+   check(ps5_vrange_commit(base + 0x4000, 0x8000, PS5_SHM_READ | PS5_SHM_WRITE) == 0,
+         "commit: two pages");
+   ps5_shm_live(&stats);
+   check(stats.committed_bytes == 0x10000, "commit: backed by one unit");
+   check(!strcmp(host_protection(base + 0x4000), "rw-") &&
+            !strcmp(host_protection(base + 0x8000), "rw-") &&
+            !strcmp(host_protection(base), "---") && !strcmp(host_protection(base + 0xc000), "---"),
+         "commit: the unit's other pages have no access");
+   base[0x4000] = 0x11;
+   check(ps5_vrange_commit(base + 0x4000, 0x8000, PS5_SHM_READ) == 0 && base[0x4000] == 0x11 &&
+            !strcmp(host_protection(base + 0x4000), "r--"),
+         "commit: again, read-only, contents kept");
+   check(ps5_vrange_commit(base + 0x10000 - 0x100, 0x20200, PS5_SHM_READ | PS5_SHM_WRITE) == 0,
+         "commit: a range across units");
+   ps5_shm_live(&stats);
+   check(stats.committed_bytes == 4 * 0x10000, "commit: four units backed");
+   memset(base + 0x20000, 0x5a, 0x10000);
+   check(ps5_vrange_decommit(base + 0x20000, 0x10000) == 0, "decommit: a whole unit");
+   ps5_shm_live(&stats);
+   check(stats.committed_bytes == 3 * 0x10000 && !strcmp(host_protection(base + 0x20000), "---"),
+         "decommit: given back, reserved again");
+   check(ps5_vrange_commit(base + 0x20000, 0x10000, PS5_SHM_READ | PS5_SHM_WRITE) == 0 &&
+            base[0x20000] == 0 && base[0x2ffff] == 0,
+         "decommit: zero at its next commit");
+   base[0x10100] = 0xaa;
+   check(ps5_vrange_decommit(base + 0x10000, 0x4000) == 0 && base[0x10100] == 0 &&
+            !strcmp(host_protection(base + 0x10000), "rw-"),
+         "decommit: part of a unit is zeroed, and kept");
+   ps5_shm_live(&stats);
+   check(stats.committed_bytes == 4 * 0x10000, "decommit: the partial unit stays backed");
+   check(ps5_vrange_commit(base + 0x80000, 0x10000, PS5_SHM_READ | PS5_SHM_WRITE | PS5_SHM_EXEC) == 0,
+         "commit: read-write-execute");
+   write_return(base + 0x80000, 23);
+   check(call(base + 0x80000) == 23, "commit: code in it runs");
+   check(ps5_vrange_release(base, 1 << 20) == 0, "commit: the range released");
+   ps5_shm_live(&stats);
+   check(stats.committed_bytes == 0 && nothing_live(), "commit: its units went with it");
+   check(ps5_vrange_reserve_at(base, 1 << 20) == 0 && ps5_vrange_reserve_at(base, 0x10000) == PS5_SHM_NO_PLACE,
+         "reserve_at: exactly there, once");
+   check(ps5_vrange_reserve_at((void *)0x200000000ull, 0x10000) == PS5_SHM_NO_PLACE,
+         "reserve_at: never in the GPU window");
+   check(ps5_vrange_reserve_at(base + 0x4000, 0x10000) == PS5_SHM_BAD_REQUEST,
+         "reserve_at: a 64 KiB multiple");
+   ps5_vrange_release(base, 1 << 20);
+   check(nothing_live(), "reserve_at: nothing live");
+}
+
 /* memfd_create: an object ftruncate sizes, two shared views of it. */
 static void
 test_memfd(void)
@@ -558,6 +640,54 @@ test_memfd(void)
 }
 
 /* ---- libc --------------------------------------------------------------------- */
+
+/* accept4, getpagesizes, in6addr_any and thread affinity (src/libc.c). */
+static void
+test_libc_system(void)
+{
+   size_t sizes[2] = {0, 0};
+   check(ps5_getpagesizes(NULL, 0) == 1 && ps5_getpagesizes(sizes, 2) == 1 && sizes[0] == 0x4000 &&
+            sizes[1] == 0,
+         "getpagesizes: the 16 KiB page");
+   errno = 0;
+   check(ps5_getpagesizes(NULL, 1) == -1 && errno == EINVAL, "getpagesizes: no array for a count");
+   static const uint8_t zero[16];
+   check(!memcmp(&ps5_in6addr_any, zero, sizeof(zero)), "in6addr_any: the wildcard");
+
+   const int listener = socket(AF_INET, SOCK_STREAM, 0);
+   struct sockaddr_in at = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+   socklen_t length = sizeof(at);
+   check(listener >= 0 && bind(listener, (struct sockaddr *)&at, sizeof(at)) == 0 &&
+            listen(listener, 1) == 0 && getsockname(listener, (struct sockaddr *)&at, &length) == 0,
+         "accept4: a listener");
+   const int client = socket(AF_INET, SOCK_STREAM, 0);
+   check(connect(client, (struct sockaddr *)&at, sizeof(at)) == 0, "accept4: connected");
+   const int accepted = ps5_accept4(listener, NULL, NULL, SOCK_CLOEXEC | SOCK_NONBLOCK);
+   check(accepted >= 0 && (fcntl(accepted, F_GETFD) & FD_CLOEXEC) &&
+            (fcntl(accepted, F_GETFL) & O_NONBLOCK),
+         "accept4: close-on-exec and non-blocking");
+   errno = 0;
+   check(ps5_accept4(listener, NULL, NULL, 0x4) == -1 && errno == EINVAL, "accept4: unknown flags");
+   close(accepted);
+   close(client);
+   close(listener);
+
+   uint8_t set[16];
+   memset(set, 0xff, sizeof(set));
+   uint64_t mask = 0;
+   check(ps5_pthread_getaffinity_np(pthread_self(), sizeof(set), set) == 0 &&
+            (memcpy(&mask, set, 8), mask != 0) && !memcmp(set + 8, zero, 8),
+         "affinity: read as a set, CPUs past 63 clear");
+   check(ps5_pthread_setaffinity_np(pthread_self(), sizeof(set), set) == 0, "affinity: set back");
+   uint8_t none[16] = {0};
+   check(ps5_pthread_setaffinity_np(pthread_self(), sizeof(none), none) == EINVAL,
+         "affinity: no CPU is refused");
+   uint8_t far[16] = {0};
+   far[0] = 1;
+   far[9] = 1;
+   check(ps5_pthread_setaffinity_np(pthread_self(), sizeof(far), far) == EINVAL,
+         "affinity: CPUs past 63 are refused");
+}
 
 static void
 test_libc(void)
@@ -1408,6 +1538,10 @@ main(void)
    printf("%s\n", "test_shm");
    fflush(stdout);
    test_shm();
+   printf("%s\n", "test_vrange_commit");
+   test_vrange_commit();
+   printf("%s\n", "test_libc_system");
+   test_libc_system();
    printf("%s\n", "test_memfd");
    fflush(stdout);
    test_memfd();

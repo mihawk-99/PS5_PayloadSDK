@@ -17,6 +17,7 @@
 #include "ps5platform/kernel.h"
 #include "ps5platform/libc.h"
 #include "ps5platform/probe.h"
+#include "ps5platform/shm.h"
 
 #include <pthread.h>
 #include <setjmp.h>
@@ -1241,6 +1242,120 @@ probe_exec_pointer(struct probe *p)
          "a block freed read-write runs when its page is handed out again, and all of it is freed");
 }
 
+/* ---- an emulator's address-space layout (RPCS3) --------------------------- */
+
+/* RPCS3 reserves its guest memory as 8, 12, 32 and 4 GiB ranges (its
+ * Emu/Memory/vm.cpp): reserved in turn from 64 GiB up, above the GPU window
+ * and the view area, where the console grants large ranges at the hint. */
+static void
+probe_emulator_layout(struct probe *p)
+{
+   static const size_t sizes[] = {(size_t)8 << 30, (size_t)12 << 30, (size_t)32 << 30, (size_t)4 << 30};
+   enum { COUNT = sizeof(sizes) / sizeof(sizes[0]) };
+   void *bases[COUNT] = {0};
+   uintptr_t hint = (uintptr_t)0x1000000000ull;
+   unsigned placed = 0;
+   char line[256];
+   int used = snprintf(line, sizeof(line), "layout");
+   for (unsigned i = 0; i < COUNT; i++) {
+      const int result = ps5_vrange_reserve(sizes[i], (void *)hint, (size_t)1 << 30, &bases[i]);
+      if (result == 0) {
+         placed++;
+         hint = (uintptr_t)bases[i] + sizes[i];
+      }
+      if (used > 0 && used < (int)sizeof(line) - 48)
+         used += snprintf(line + used, sizeof(line) - (size_t)used, " %zuGiB=0x%x@%#llx", sizes[i] >> 30,
+                          (unsigned)result, (unsigned long long)(uintptr_t)bases[i]);
+   }
+   say(p, "%s", line);
+
+   /* Memory committed in them, as RPCS3 commits its executable tables and its
+    * JIT areas: 64 KiB pieces, read-write-execute, code run in each, then
+    * decommitted; and read-write pieces across a unit boundary. */
+   enum { PIECES = 64 };
+   unsigned ran = 0;
+   uint64_t commit_ns = 0, decommit_ns = 0;
+   uint8_t *const exec = bases[1];
+   if (exec) {
+      for (unsigned i = 0; i < PIECES; i++) {
+         uint8_t *const piece = exec + (size_t)i * ((size_t)64 << 20);
+         uint64_t t = sceKernelReadTsc();
+         const int result = ps5_vrange_commit(piece, 0x10000, PS5_SHM_READ | PS5_SHM_WRITE | PS5_SHM_EXEC);
+         commit_ns += ns_since(p, t);
+         if (result != 0)
+            continue;
+         write_return(piece, 700 + i);
+         ran += call(piece) == 700 + i;
+         t = sceKernelReadTsc();
+         ps5_vrange_decommit(piece, 0x10000);
+         decommit_ns += ns_since(p, t);
+      }
+   }
+   bool kept = false, zeroed = false;
+   if (exec) {
+      uint8_t *const across = exec + ((size_t)6 << 30) - 0x4000;
+      if (ps5_vrange_commit(across, 0x8000, PS5_SHM_READ | PS5_SHM_WRITE) == 0) {
+         across[0] = 0x11;
+         across[0x4000] = 0x22;
+         kept = ps5_vrange_commit(across, 0x8000, PS5_SHM_READ) == 0 && across[0] == 0x11 &&
+                across[0x4000] == 0x22;
+         ps5_vrange_decommit(across - 0xc000, 0x10000);
+         ps5_vrange_commit(across - 0xc000, 0x10000, PS5_SHM_READ | PS5_SHM_WRITE);
+         zeroed = across[0] == 0 && across[0x4000] == 0x22;
+         ps5_vrange_decommit(across - 0xc000, 0x20000);
+      }
+   }
+   struct ps5_shm_stats stats;
+   ps5_shm_live(&stats);
+   const uint64_t committed_before_release = stats.committed_bytes;
+   for (unsigned i = 0; i < COUNT; i++)
+      if (bases[i])
+         ps5_vrange_release(bases[i], sizes[i]);
+   ps5_shm_live(&stats);
+   say(p, "layout commit pieces=%u ran=%u commit_ns_each=%llu decommit_ns_each=%llu committed_left=%llu after_release=%llu",
+       (unsigned)PIECES, ran, (unsigned long long)(commit_ns / PIECES), (unsigned long long)(decommit_ns / PIECES),
+       (unsigned long long)committed_before_release, (unsigned long long)stats.committed_bytes);
+   check(p, placed == COUNT, "an emulator's 56 GiB guest layout (8, 12, 32 and 4 GiB) reserved from 64 GiB up");
+   check(p, ran == PIECES, "64 KiB pieces committed read-write-execute in a reservation run code");
+   check(p, kept && zeroed, "a commit keeps what is committed; a decommitted unit reads zero at its next commit");
+   check(p, stats.committed_bytes == 0, "the committed memory goes with its reservation");
+
+   /* Exactly at an address: where RPCS3 asks for its guest memory. */
+   void *const at = (void *)(uintptr_t)0x1000000000ull;
+   const int exact = ps5_vrange_reserve_at(at, (size_t)8 << 30);
+   const int again = exact == 0 ? ps5_vrange_reserve_at(at, 0x10000) : 0;
+   if (exact == 0)
+      ps5_vrange_release(at, (size_t)8 << 30);
+   say(p, "layout reserve_at=0x%x again=0x%x", (unsigned)exact, (unsigned)again);
+   check(p, exact == 0 && again == PS5_SHM_NO_PLACE, "8 GiB reserved exactly at 64 GiB, and only once");
+}
+
+/* ---- thread-local storage -------------------------------------------------- */
+
+/* A core's thread_local goes through emulated TLS (__emutls_get_address; the
+ * loader has no PT_TLS): the cost of a read, against a plain global's. */
+static _Thread_local volatile uint64_t probe_tls_value;
+static volatile uint64_t probe_global_value;
+
+static void
+probe_tls_cost(struct probe *p)
+{
+   enum { READS = 1000000 };
+   uint64_t sum = 0;
+   uint64_t t = sceKernelReadTsc();
+   for (unsigned i = 0; i < READS; i++)
+      sum += probe_global_value;
+   const uint64_t global_ns = ns_since(p, t);
+   probe_tls_value = 1;
+   t = sceKernelReadTsc();
+   for (unsigned i = 0; i < READS; i++)
+      sum += probe_tls_value;
+   const uint64_t tls_ns = ns_since(p, t);
+   say(p, "tls reads=%u global_ns=%llu tls_ns=%llu tls_ns_each_x1000=%llu sum=%llu", (unsigned)READS,
+       (unsigned long long)global_ns, (unsigned long long)tls_ns,
+       (unsigned long long)(tls_ns * 1000 / READS), (unsigned long long)sum);
+}
+
 int
 ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
 {
@@ -1263,6 +1378,8 @@ ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags)
    probe_reuse(&p);
    probe_exec_pointer(&p);
    probe_page_views(&p);
+   probe_emulator_layout(&p);
+   probe_tls_cost(&p);
    if (flags & PS5_PROBE_LARGE)
       probe_large(&p);
    if (flags & PS5_PROBE_HUGE) {

@@ -53,12 +53,30 @@ int ps5_shm_unmap(void *view, size_t bytes, unsigned flags);
 /* A reserved range: address space nothing else is given, outside the GPU
  * window, at the hint when it is free. */
 int ps5_vrange_reserve(size_t bytes, void *hint, size_t alignment, void **base);
+/* Exactly at the address (a multiple of 64 KiB), or PS5_SHM_NO_PLACE. */
+int ps5_vrange_reserve_at(void *address, size_t bytes);
+/* Releases the range, and the committed memory in it. */
 int ps5_vrange_release(void *base, size_t bytes);
+
+/* Committed memory in a reserved range, as a system that overcommits backs an
+ * anonymous mapping: direct memory in 64 KiB units, each allocated and mapped
+ * at its first commit (a title's anonymous mappings would be charged to its
+ * small flexible budget). The range is rounded out to whole units for the
+ * backing and to 16 KiB pages for the protection; the rest of a unit it backs
+ * newly has no access, as a reservation. Committing what is already backed
+ * changes the protection and keeps the contents.
+ *
+ * Decommitting gives back the units wholly inside the range: they are
+ * reserved again, with no access, and zero at their next commit. The part of a
+ * unit only partly inside is zeroed, and kept. */
+int ps5_vrange_commit(void *address, size_t bytes, int protection);
+int ps5_vrange_decommit(void *address, size_t bytes);
 
 struct ps5_shm_stats {
    uint64_t objects, object_bytes;
    uint64_t views, view_bytes;
    uint64_t ranges, range_bytes;
+   uint64_t committed_bytes; /* ps5_vrange_commit's units */
 };
 void ps5_shm_live(struct ps5_shm_stats *stats);
 
