@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -490,6 +491,78 @@ offload_check(int fd, uint64_t size)
    return true;
 }
 
+/* One of several connections appending to a file of its own at once. */
+struct offload_lane {
+   unsigned port;
+   char server_path[512];
+   double seconds;
+   uint64_t limit;
+   uint64_t sent;
+   int confirmed;
+};
+
+static void *
+offload_lane_run(void *argument)
+{
+   struct offload_lane *lane = argument;
+   struct ps5_ftp ftp;
+   lane->confirmed = -1;
+   if (ps5_ftp_open(&ftp, lane->port) != 0)
+      return NULL;
+   const int data = ps5_ftp_append_begin(&ftp, lane->server_path);
+   if (data >= 0) {
+      uint64_t *const pattern = malloc(1 << 20);
+      if (pattern)
+         file_fill(pattern, 0, 1 << 20);
+      struct timespec start;
+      clock_gettime(CLOCK_MONOTONIC, &start);
+      while (pattern && lane->sent < lane->limit && file_ms_since(&start) < lane->seconds * 1000.0 &&
+             ps5_ftp_send(data, pattern, 1 << 20) == 0)
+         lane->sent += 1 << 20;
+      free(pattern);
+      lane->confirmed = ps5_ftp_transfer_end(&ftp, data);
+   }
+   ps5_ftp_close(&ftp);
+   return NULL;
+}
+
+/* `count` connections at once, each appending to a file of its own for
+ * `seconds` or its share of `bytes`; logs their total rate, including the
+ * wait for the confirmations. */
+static bool
+offload_parallel(struct file_probe *p, unsigned port, const char *server_directory, const char *directory,
+                 unsigned count, uint64_t bytes, unsigned seconds)
+{
+   struct offload_lane lanes[16];
+   pthread_t threads[16];
+   if (count > 16)
+      count = 16;
+   struct timespec start;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   for (unsigned i = 0; i < count; ++i) {
+      memset(&lanes[i], 0, sizeof(lanes[i]));
+      lanes[i].port = port;
+      lanes[i].seconds = seconds;
+      lanes[i].limit = bytes / count;
+      snprintf(lanes[i].server_path, sizeof(lanes[i].server_path), "%s/%s.%u", server_directory, FILE_PROBE_NAME, i);
+      pthread_create(&threads[i], NULL, offload_lane_run, &lanes[i]);
+   }
+   uint64_t total = 0;
+   bool ok = true;
+   for (unsigned i = 0; i < count; ++i) {
+      pthread_join(threads[i], NULL);
+      total += lanes[i].sent;
+      ok &= lanes[i].confirmed == 0;
+      char path[512];
+      snprintf(path, sizeof(path), "%s/%s.%u", directory, FILE_PROBE_NAME, i);
+      unlink(path);
+   }
+   const double ms = file_ms_since(&start);
+   file_say(p, "offload %u connections at once: %llu MiB in %.1f s, %.1f MiB/s in all, confirmed=%d", count,
+            (unsigned long long)(total >> 20), ms / 1000.0, (double)total / 1048576.0 / (ms / 1000.0), ok);
+   return ok;
+}
+
 int
 ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *directory,
                                const char *server_directory, unsigned port, unsigned mib, unsigned seconds)
@@ -575,6 +648,11 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
          fresh_ok &= ok;
       }
    }
+
+   /* Several connections at once, each to a file of its own. */
+   static const unsigned lanes[3] = {1, 4, 8};
+   for (int i = 0; i < 3 && !sink; ++i)
+      fresh_ok &= offload_parallel(&p, port, server_directory, directory, lanes[i], half, seconds / 6);
 
    /* The caller's own file: created, opened and its first 16 MiB written
     * here; the server appends the rest while the caller holds it open. */

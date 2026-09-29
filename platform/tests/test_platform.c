@@ -1020,7 +1020,7 @@ fake_ftp_listen(unsigned *port)
    const int fd = socket(AF_INET, SOCK_STREAM, 0);
    struct sockaddr_in address = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
    socklen_t length = sizeof(address);
-   if (fd < 0 || bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(fd, 1) != 0 ||
+   if (fd < 0 || bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(fd, 16) != 0 ||
        getsockname(fd, (struct sockaddr *)&address, &length) != 0)
       return -1;
    *port = ntohs(address.sin_port);
@@ -1076,7 +1076,7 @@ fake_ftp_session(struct fake_ftp *server, int control)
          close(data);
          close(data_listener);
          data_listener = -1;
-         server->appended++;
+         __atomic_fetch_add(&server->appended, 1, __ATOMIC_SEQ_CST);
          fake_ftp_say(control, "226 done\r\n");
       } else if (!strncmp(line, "QUIT", 4)) {
          fake_ftp_say(control, "221 bye\r\n");
@@ -1087,20 +1087,39 @@ fake_ftp_session(struct fake_ftp *server, int control)
    return false;
 }
 
-/* Serves client after client (a scan's greeting check is one) until a
- * session ends with QUIT. */
+struct fake_ftp_client {
+   struct fake_ftp *server;
+   int control;
+};
+
+static void *
+fake_ftp_client_run(void *argument)
+{
+   struct fake_ftp_client *client = argument;
+   fake_ftp_session(client->server, client->control);
+   close(client->control);
+   free(client);
+   return NULL;
+}
+
+/* Serves every client on a thread of its own (a scan's greeting check is one
+ * client, the probe's connections at once are others) until the listener is
+ * shut down. */
 static void *
 fake_ftp_serve(void *argument)
 {
    struct fake_ftp *server = argument;
-   for (bool quit = false; !quit;) {
+   for (;;) {
       const int control = accept(server->listener, NULL, NULL);
       if (control < 0)
          return NULL;
-      quit = fake_ftp_session(server, control);
-      close(control);
+      struct fake_ftp_client *client = malloc(sizeof(*client));
+      client->server = server;
+      client->control = control;
+      pthread_t thread;
+      if (pthread_create(&thread, NULL, fake_ftp_client_run, client) == 0)
+         pthread_detach(thread);
    }
-   return NULL;
 }
 
 static void
@@ -1118,9 +1137,11 @@ test_probe_ftp_offload(void)
          "offload: the loopback scan finds the server by its greeting");
    check(ps5_platform_probe_ftp_offload(probe_line, &seen, directory, directory, server.port, 96, 60) == 0,
          "offload: what the server appends is the caller's own file, whole and in order");
+   shutdown(server.listener, SHUT_RDWR);
    pthread_join(thread, NULL);
    close(server.listener);
-   check(server.appended == 5, "offload: an APPE for each way to the server's file, one for the caller's");
+   check(__atomic_load_n(&server.appended, __ATOMIC_SEQ_CST) == 4 + 13 + 1,
+         "offload: an APPE for each way to the server's file, each lane, and the caller's file");
    check(seen.lines >= 3, "offload: the probe reports statfs, its segments and its total");
    check(rmdir(directory) == 0, "offload: the probe leaves its directory empty");
 }
