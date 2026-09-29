@@ -547,20 +547,22 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    const uint64_t half = (uint64_t)mib * 1024u * 1024u / 2;
 
    /* The server's own file: it creates it, and the caller opens it after;
-    * sent in 16 MiB pieces as fast as the route takes them, in 64 KiB pieces,
-    * and at 20 MiB/s (about what the network brings it). */
+    * sent in 16 MiB pieces as fast as the route takes them, then paced at
+    * 60 MiB/s in pieces of 64 KiB, 256 KiB and 1 MiB. The server writes what
+    * each recv() gives it: a paced sender keeps those writes to its pieces. */
    static const struct {
       size_t send_size;
       double pace_mibs;
       const char *how;
-   } ways[3] = {{FILE_PROBE_CHUNK_MAX, 0, "server's file"},
-                {64u * 1024u, 0, "server's file, 64 KiB sends"},
-                {1024u * 1024u, 20, "server's file, 20 MiB/s"}};
+   } ways[4] = {{FILE_PROBE_CHUNK_MAX, 0, "server's file"},
+                {64u * 1024u, 60, "server's file, 64 KiB at 60 MiB/s"},
+                {256u * 1024u, 60, "server's file, 256 KiB at 60 MiB/s"},
+                {1024u * 1024u, 60, "server's file, 1 MiB at 60 MiB/s"}};
    uint64_t fresh = 0;
    bool fresh_ok = true;
-   for (int way = 0; way < 3; ++way) {
+   for (int way = 0; way < 4; ++way) {
       unlink(path);
-      fresh = offload_send(&p, &ftp, server_path, buffer, 0, half, seconds / 4, ways[way].send_size,
+      fresh = offload_send(&p, &ftp, server_path, buffer, 0, half, seconds / 5, ways[way].send_size,
                            ways[way].pace_mibs, ways[way].how);
       if (!sink) {
          const int fd = open(path, O_RDONLY);
@@ -583,7 +585,7 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    if (!sink && (fd < 0 || write(fd, buffer, first) != (ssize_t)first || fstat(fd, &before) != 0))
       file_say(&p, "offload caller's file: the local file failed errno=%d", errno);
    else if (!sink) {
-      const uint64_t end = offload_send(&p, &ftp, server_path, buffer, first, first + half, seconds / 4,
+      const uint64_t end = offload_send(&p, &ftp, server_path, buffer, first, first + half, seconds / 5,
                                         FILE_PROBE_CHUNK_MAX, 0, "caller's file");
       struct stat after;
       own_ok = end && fstat(fd, &after) == 0 && after.st_ino == before.st_ino && offload_check(fd, end);

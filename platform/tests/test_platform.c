@@ -1120,7 +1120,7 @@ test_probe_ftp_offload(void)
          "offload: what the server appends is the caller's own file, whole and in order");
    pthread_join(thread, NULL);
    close(server.listener);
-   check(server.appended == 4, "offload: an APPE for each way to the server's file, one for the caller's");
+   check(server.appended == 5, "offload: an APPE for each way to the server's file, one for the caller's");
    check(seen.lines >= 3, "offload: the probe reports statfs, its segments and its total");
    check(rmdir(directory) == 0, "offload: the probe leaves its directory empty");
 }
