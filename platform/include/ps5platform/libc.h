@@ -38,6 +38,8 @@
  *                          shared memory object, as FreeBSD 13 builds it
  *   accept4, getpagesizes, in6addr_any
  *                          no system module exports them
+ *   syscall                a title may make no system call: write for SYS_write
+ *                          (Abseil's raw logging), ENOSYS for the rest
  *   sysconf                exported, but _SC_NPROCESSORS_ONLN and _CONF answer
  *                          16 where a title's threads run on 13
  *   pthread_getaffinity_np, pthread_setaffinity_np
@@ -133,6 +135,10 @@ extern const struct in6_addr ps5_in6addr_any;
  * their 64-bit mask: CPU n is bit n. A set naming CPUs past 63, or none, is
  * refused with EINVAL. Error numbers are returned, as pthread functions do. */
 int ps5_pthread_getaffinity_np(pthread_t thread, size_t size, void *set);
+
+/* syscall(2) without a system call: SYS_write is write(); any other number
+ * fails with ENOSYS, as a system without that call answers. */
+long ps5_syscall(long number, ...);
 
 /* sysconf, with the CPUs a title's threads may run on for _SC_NPROCESSORS_ONLN
  * and _SC_NPROCESSORS_CONF: the CPUs in the first caller's affinity mask

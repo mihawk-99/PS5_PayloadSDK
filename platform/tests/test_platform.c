@@ -38,6 +38,7 @@ extern int host_empty_decimal_point;
 #include <string.h>
 #include <sys/times.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -656,6 +657,15 @@ test_libc_system(void)
    check(ps5_getpagesizes(NULL, 1) == -1 && errno == EINVAL, "getpagesizes: no array for a count");
    static const uint8_t zero[16];
    check(!memcmp(&ps5_in6addr_any, zero, sizeof(zero)), "in6addr_any: the wildcard");
+   int pipe_ends[2];
+   char got[4] = {0};
+   check(pipe(pipe_ends) == 0 && ps5_syscall(SYS_write, pipe_ends[1], "abc", (size_t)3) == 3 &&
+            read(pipe_ends[0], got, 3) == 3 && !strcmp(got, "abc"),
+         "syscall: SYS_write writes");
+   close(pipe_ends[0]);
+   close(pipe_ends[1]);
+   errno = 0;
+   check(ps5_syscall(SYS_getpid) == -1 && errno == ENOSYS, "syscall: anything else is ENOSYS");
    check(!strcmp(ps5_gai_strerror(EAI_FAIL), "Non-recoverable failure in name resolution") &&
             !strcmp(ps5_gai_strerror(EAI_AGAIN), "Temporary failure in name resolution") &&
             !strcmp(ps5_gai_strerror(9999), "Unknown error"),

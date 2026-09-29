@@ -20,6 +20,8 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/syscall.h>
+#include <stdarg.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #if __has_include(<sys/sockio.h>)
@@ -231,6 +233,24 @@ ps5_pthread_getaffinity_np(pthread_t thread, size_t size, void *set)
    memset(set, 0, size);
    memcpy(set, &mask, size < sizeof(mask) ? size : sizeof(mask));
    return 0;
+}
+
+long
+ps5_syscall(long number, ...)
+{
+   va_list arguments;
+   va_start(arguments, number);
+   long result = -1;
+   if (number == SYS_write) {
+      const int fd = va_arg(arguments, int);
+      const void *const buffer = va_arg(arguments, const void *);
+      const size_t bytes = va_arg(arguments, size_t);
+      result = write(fd, buffer, bytes);
+   } else {
+      errno = ENOSYS;
+   }
+   va_end(arguments);
+   return result;
 }
 
 long
