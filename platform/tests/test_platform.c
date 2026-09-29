@@ -982,6 +982,18 @@ test_probe_files(void)
 }
 
 static void
+test_probe_writes(void)
+{
+   char directory[] = "/tmp/ps5-platform-writes-XXXXXX";
+   check(mkdtemp(directory) != NULL, "writes: a directory of its own");
+   struct probe_lines seen = {0};
+   check(ps5_platform_probe_writes(probe_line, &seen, directory, 64, 60) == 0,
+         "writes: every sustained pass writes what it is asked");
+   check(seen.lines >= 6, "writes: each pass reports its segments and its total");
+   check(rmdir(directory) == 0, "writes: the probe leaves its directory empty");
+}
+
+static void
 test_probe_threads(void)
 {
    struct probe_lines seen = {0};
@@ -1578,6 +1590,7 @@ main(void)
    printf("%s\n", "test_probe_files");
    fflush(stdout);
    test_probe_files();
+   test_probe_writes();
    printf("%s\n", "test_probe_threads");
    fflush(stdout);
    test_probe_threads();

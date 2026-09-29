@@ -243,3 +243,81 @@ ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *direct
    file_say(&p, "end failures=%d", p.failures);
    return p.failures;
 }
+
+/* One sustained pass: false when a write fails. */
+static bool
+writes_pass(struct file_probe *p, const char *path, uint64_t *buffer, unsigned mib, unsigned seconds,
+            int flags, bool sync_segments, const char *how)
+{
+   const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | flags, 0666);
+   if (fd < 0) {
+      file_say(p, "writes %s: open failed errno=%d", how, errno);
+      return flags != 0; /* a refused O_DIRECT is an answer, not a failure */
+   }
+   const uint64_t segment = 256u * 1024u * 1024u, total = (uint64_t)mib * 1024u * 1024u;
+   struct timespec start, mark;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   mark = start;
+   uint64_t at = 0;
+   bool ok = true;
+   while (at < total) {
+      const size_t chunk = (size_t)(total - at < FILE_PROBE_CHUNK_MAX ? total - at : FILE_PROBE_CHUNK_MAX);
+      file_fill(buffer, at, chunk);
+      if (write(fd, buffer, chunk) != (ssize_t)chunk) {
+         file_say(p, "writes %s: write at %llu failed errno=%d", how, (unsigned long long)at, errno);
+         ok = false;
+         break;
+      }
+      at += chunk;
+      if (at % segment == 0 || at == total) {
+         if (sync_segments)
+            fsync(fd);
+         const double ms = file_ms_since(&mark);
+         const uint64_t bytes = at % segment ? at % segment : segment;
+         file_say(p, "writes %s: %llu MiB, this segment %.1f MiB/s", how,
+                  (unsigned long long)(at >> 20), (double)bytes / 1048576.0 / (ms / 1000.0));
+         clock_gettime(CLOCK_MONOTONIC, &mark);
+         if (file_ms_since(&start) > seconds * 1000.0) {
+            file_say(p, "writes %s: stopped after %u s", how, seconds);
+            break;
+         }
+      }
+   }
+   const double written_ms = file_ms_since(&start);
+   fsync(fd);
+   const double synced_ms = file_ms_since(&start);
+   close(fd);
+   unlink(path);
+   file_say(p, "writes %s: %llu MiB, %.1f MiB/s to the last write, %.1f MiB/s after fsync", how,
+            (unsigned long long)(at >> 20), (double)at / 1048576.0 / (written_ms / 1000.0),
+            (double)at / 1048576.0 / (synced_ms / 1000.0));
+   return ok;
+}
+
+int
+ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *directory, unsigned mib,
+                          unsigned seconds)
+{
+   struct file_probe p = {.log = log, .context = context};
+   char path[512];
+   if (snprintf(path, sizeof(path), "%s/%s", directory, FILE_PROBE_NAME) >= (int)sizeof(path)) {
+      file_say(&p, "directory name too long");
+      return 1;
+   }
+   unlink(path);
+   void *const mapped = mmap(NULL, FILE_PROBE_CHUNK_MAX, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANON, -1, 0);
+   if (mapped == MAP_FAILED) {
+      file_say(&p, "no memory for a %u byte buffer, errno=%d", FILE_PROBE_CHUNK_MAX, errno);
+      return 1;
+   }
+   file_say(&p, "writes begin directory=%s mib=%u seconds=%u", directory, mib, seconds);
+#ifdef O_DIRECT
+   p.failures += writes_pass(&p, path, mapped, mib, seconds, O_DIRECT, false, "direct") ? 0 : 1;
+#endif
+   p.failures += writes_pass(&p, path, mapped, mib, seconds, 0, true, "buffered+fsync") ? 0 : 1;
+   p.failures += writes_pass(&p, path, mapped, mib, seconds, 0, false, "buffered") ? 0 : 1;
+   munmap(mapped, FILE_PROBE_CHUNK_MAX);
+   file_say(&p, "writes end failures=%d", p.failures);
+   return p.failures;
+}

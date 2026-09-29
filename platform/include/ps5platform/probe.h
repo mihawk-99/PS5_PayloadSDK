@@ -40,6 +40,15 @@ int ps5_platform_probe(ps5_probe_log_fn log, void *context, unsigned flags);
  * 1 MiB and 4 MiB ones. Returns how many checks failed. */
 int ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *directory);
 
+/* The sustained write test (src/probe_files.c): `mib` MiB written in one file
+ * of `directory`, 16 MiB at a time, with O_DIRECT, then buffered with an
+ * fsync() after every 256 MiB, then buffered alone, each timed per 256 MiB
+ * and stopped after `seconds`. The 256 MiB the file test writes fit in the
+ * kernel's write cache; a game's package does not. Returns how many checks
+ * failed (a write that fails). */
+int ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *directory, unsigned mib,
+                              unsigned seconds);
+
 /* The thread test (src/probe_threads.c): the stack size a fresh attribute
  * object reports, the calling thread's stack, and the stacks a thread created
  * with no attributes and one asking for 2 MiB run on, read back from inside

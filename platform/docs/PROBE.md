@@ -185,6 +185,28 @@ buffer, the opposite of FreeBSD's `fwrite()`, which writes large data directly.
 A file written whole and large belongs on the descriptor, in chunks of a
 megabyte or more; stdio suits small writes, which it gathers.
 
+### Sustained writes
+
+256 MiB fit in what the console lets a title write at full speed; a game's
+package does not. `ps5_platform_probe_writes` (the title's `writes` word)
+writes 3 GiB in one file of the title's folder, 16 MiB at a time, timed per
+256 MiB and stopped after 240 s, three ways in a row (2026-09-28):
+
+| How | Per 256 MiB |
+|---|---|
+| `O_DIRECT` | 242-243 MiB/s for the first 1280 MiB, then 36, 27, 12, 4.7 and 2.1 MiB/s |
+| buffered, `fsync()` after each 256 MiB | 2.0-2.1 MiB/s |
+| buffered | 2.0-2.1 MiB/s |
+
+Right after, the console's FTP server (another process) wrote 512 MiB to the
+same folder at 22 MiB/s, which the network limits, steadily. So the storage is
+not the limit: a title's writes run at full speed for a burst of a few GiB and
+then at about 2 MiB/s, whatever the caching, while another process writes
+faster. RPCS3's package installer met it in the RetroArch title: God of War
+HD's 6.3 GB package installed at 13 MB/s for its first 2.7 GB and at 2.2 MB/s
+after that, 31.5 minutes in all, with its writing thread in `write()` for
+almost every sample.
+
 ## Threads
 
 `ps5_platform_probe_threads` (src/probe_threads.c) reads back, with
