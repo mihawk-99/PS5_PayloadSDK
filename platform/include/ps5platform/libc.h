@@ -21,7 +21,7 @@
  *                          libkernel_sys): they fault
  *   opendir and its family exported, but refused to a title; enumeration
  *                          goes through getdents
- *   getaddrinfo, freeaddrinfo, getnameinfo, gethostbyname
+ *   getaddrinfo, freeaddrinfo, getnameinfo, gethostbyname, gai_strerror
  *                          routed by the SDK to a module titles do not load
  *   qsort_r, mkstemps, openlog, uname (__xuname), regcomp, regexec,
  *   regfree, regerror, __assert, __memset_chk
@@ -167,6 +167,8 @@ int ps5_clock_nanosleep(clockid_t clock, int flags, const struct timespec *reque
 int ps5_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
                     struct addrinfo **result);
 void ps5_freeaddrinfo(struct addrinfo *info);
+/* FreeBSD's message for each EAI_* code. */
+const char *ps5_gai_strerror(int error);
 struct hostent *ps5_gethostbyaddr(const void *address, unsigned int length, int type);
 struct hostent *ps5_gethostbyname(const char *name);
 int ps5_getnameinfo(const void *address, unsigned int length, char *host, unsigned int host_size,
@@ -321,6 +323,10 @@ int ps5_dladdr(const void *address, void *info);
  * main thread's. A consumer linking with --wrap=pthread_create gets it for
  * every such thread, its libraries' included (src/threads.c). */
 #define PS5_THREAD_STACK_BYTES ((size_t)2 << 20)
+
+/* pthread_exit, after the calling thread's C++ thread_local destructors, which
+ * the platform runs before libkernel's key destructors (src/cxa.c). */
+void ps5_pthread_exit(void *value) __attribute__((__noreturn__));
 
 /* Thread stacks in direct memory (src/threads.c): those of threads not yet
  * ended and joined, and freed ones kept for the next threads. */

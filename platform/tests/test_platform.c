@@ -656,6 +656,10 @@ test_libc_system(void)
    check(ps5_getpagesizes(NULL, 1) == -1 && errno == EINVAL, "getpagesizes: no array for a count");
    static const uint8_t zero[16];
    check(!memcmp(&ps5_in6addr_any, zero, sizeof(zero)), "in6addr_any: the wildcard");
+   check(!strcmp(ps5_gai_strerror(EAI_FAIL), "Non-recoverable failure in name resolution") &&
+            !strcmp(ps5_gai_strerror(EAI_AGAIN), "Temporary failure in name resolution") &&
+            !strcmp(ps5_gai_strerror(9999), "Unknown error"),
+         "gai_strerror: FreeBSD's messages");
 
    const int listener = socket(AF_INET, SOCK_STREAM, 0);
    struct sockaddr_in at = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
@@ -935,7 +939,8 @@ test_probe_threads(void)
 {
    struct probe_lines seen = {0};
    check(ps5_platform_probe_threads(probe_line, &seen) == 0, "threads: the probe reports no failure");
-   check(seen.passes == 2, "threads: both threads report their stacks");
+   check(seen.passes == 3,
+         "threads: both threads report their stacks, and a thread_local destructor reads its storage");
 }
 
 

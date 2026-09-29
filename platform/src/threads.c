@@ -234,13 +234,20 @@ mxcsr_write(uint32_t mxcsr)
    __asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
 }
 
+/* src/cxa.c: the calling thread's C++ thread_local destructors, now. */
+void ps5p_run_thread_destructors(void);
+
 static void *
 thread_start(void *opaque)
 {
    struct thread_record *const record = opaque;
    mxcsr_write(record->mxcsr);
    pthread_setspecific(finish_key, record);
-   return record->start(record->argument);
+   void *const result = record->start(record->argument);
+   /* Its thread_local destructors, while its thread-local storage is whole
+    * (src/cxa.c). */
+   ps5p_run_thread_destructors();
+   return result;
 }
 
 /* A thread on a stack of its own (or libkernel's): only the creator's MXCSR
@@ -257,7 +264,9 @@ plain_thread_start(void *opaque)
    const struct plain_start begin = *(const struct plain_start *)opaque;
    free(opaque);
    mxcsr_write(begin.mxcsr);
-   return begin.start(begin.argument);
+   void *const result = begin.start(begin.argument);
+   ps5p_run_thread_destructors();
+   return result;
 }
 
 static int
@@ -413,4 +422,13 @@ ps5_thread_stacks(unsigned *live, unsigned *cached_stacks)
    *live = live_stacks;
    *cached_stacks = cached;
    pthread_mutex_unlock(&lock);
+}
+
+void
+ps5_pthread_exit(void *value)
+{
+   /* The thread_local destructors first, as its start routine returning
+    * would run them (src/cxa.c). */
+   ps5p_run_thread_destructors();
+   pthread_exit(value);
 }

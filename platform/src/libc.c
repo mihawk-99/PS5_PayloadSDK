@@ -462,6 +462,39 @@ ps5_getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
    return EAI_FAIL;
 }
 
+const char *
+ps5_gai_strerror(int error)
+{
+   /* FreeBSD's messages (lib/libc/net/gai_strerror.c), by name: the codes'
+    * values are the system's own. */
+   switch (error) {
+   case 0: return "Success";
+#ifdef EAI_ADDRFAMILY
+   case EAI_ADDRFAMILY: return "Address family for hostname not supported";
+#endif
+   case EAI_AGAIN: return "Temporary failure in name resolution";
+   case EAI_BADFLAGS: return "Invalid value for ai_flags";
+   case EAI_FAIL: return "Non-recoverable failure in name resolution";
+   case EAI_FAMILY: return "ai_family not supported";
+   case EAI_MEMORY: return "Memory allocation failure";
+#if defined(EAI_NODATA) && EAI_NODATA != EAI_NONAME
+   case EAI_NODATA: return "No address associated with hostname";
+#endif
+   case EAI_NONAME: return "hostname nor servname provided, or not known";
+   case EAI_SERVICE: return "servname not supported for ai_socktype";
+   case EAI_SOCKTYPE: return "ai_socktype not supported";
+   case EAI_SYSTEM: return "System error returned in errno";
+#ifdef EAI_BADHINTS
+   case EAI_BADHINTS: return "Invalid value for hints";
+#endif
+#ifdef EAI_PROTOCOL
+   case EAI_PROTOCOL: return "Resolved protocol is unknown";
+#endif
+   case EAI_OVERFLOW: return "Argument buffer overflow";
+   default: return "Unknown error";
+   }
+}
+
 void
 ps5_freeaddrinfo(struct addrinfo *info)
 {

@@ -132,6 +132,18 @@ the SDK builds with `-femulated-tls`). A read of one, through a call that is
 never inlined, took 4.7 ns against 1.3 ns for a global read the same way:
 about 3.4 ns for the lookup (a million reads each, 2026-09-28).
 
+**Thread exit.** libkernel runs a thread's pthread key destructors in one
+pass, in no order a title can rely on, and a destructor that sets its key again
+is not called a second time. Emulated TLS frees a thread's thread-local storage
+from its own key, so a C++ `thread_local` destructor run from another key could
+find its object's storage already freed: the RPCS3 core crashed in the title
+heap's `free` that way at its first thread's exit. Deferring emutls's
+deallocation by one round, as Android does, did not help (the destructor still
+read a fresh zero). The platform runs a thread's `thread_local` destructors as
+soon as its start routine returns, and from `ps5_pthread_exit`, before any key
+destructor, as glibc does; the probe's destructor then reads its thread's value
+(2026-09-28).
+
 ## The shared-memory JIT interface
 
 `sceKernelJitCreateSharedMemory` is exported (under libkernel_web's JIT

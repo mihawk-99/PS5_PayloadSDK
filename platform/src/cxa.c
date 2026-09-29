@@ -10,6 +10,14 @@
  * key's destructor runs, last registered first, when the thread exits, and the
  * thread that calls exit() runs its own from an atexit handler, since exit()
  * runs no key destructors.
+ *
+ * A thread the platform's pthread_create started runs its list as soon as its
+ * start routine returns (src/threads.c), as glibc runs thread_local
+ * destructors before any key destructor: the console's libkernel runs key
+ * destructors in no set order and in one pass, and emulated TLS frees a
+ * thread's thread_local storage from its own key, which left a destructor that
+ * ran after it working on freed storage (docs/PROBE.md). The key stays for
+ * threads that exit another way.
  */
 #include "ps5platform/libc.h"
 
@@ -42,6 +50,16 @@ run_destructors(void *list)
       }
       entry = next;
    }
+}
+
+void
+ps5p_run_thread_destructors(void)
+{
+   if (!destructors_ready)
+      return;
+   struct thread_destructor *const list = pthread_getspecific(destructors_key);
+   pthread_setspecific(destructors_key, NULL);
+   run_destructors(list);
 }
 
 static void

@@ -369,6 +369,42 @@ thread_scheduling(struct thread_probe *p)
               ps5_sysconf(_SC_NPROCESSORS_ONLN));
 }
 
+/* A thread_local's destructor sees its own thread's thread-local storage: the
+ * C++ destructors (ps5___cxa_thread_atexit_impl's key) run before emulated TLS
+ * frees the thread's storage (its own key). */
+static _Thread_local uint64_t order_value;
+static uint64_t order_seen;
+
+static void
+order_destructor(void *object)
+{
+   (void)object;
+   order_seen = order_value;
+}
+
+static void *
+order_body(void *unused)
+{
+   (void)unused;
+   order_value = 0x5a5a1234u;
+   ps5___cxa_thread_atexit_impl(order_destructor, NULL, NULL);
+   return NULL;
+}
+
+static void
+thread_local_order(struct thread_probe *p)
+{
+   order_seen = 0;
+   pthread_t thread;
+   const int created = pthread_create(&thread, NULL, order_body, NULL);
+   if (created == 0)
+      pthread_join(thread, NULL);
+   const bool ok = created == 0 && order_seen == 0x5a5a1234u;
+   p->failures += ok ? 0 : 1;
+   thread_say(p, "check %s a thread_local destructor at thread exit reads its thread's storage (%#llx)",
+              ok ? "PASS" : "FAIL", (unsigned long long)order_seen);
+}
+
 int
 ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
 {
@@ -409,6 +445,7 @@ ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
    thread_ping(&p, false);
    thread_ping(&p, true);
    thread_scheduling(&p);
+   thread_local_order(&p);
 
    thread_say(&p, "end failures=%d", p.failures);
    return p.failures;
