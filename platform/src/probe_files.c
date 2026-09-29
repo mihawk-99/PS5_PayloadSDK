@@ -301,61 +301,80 @@ writes_pass(struct file_probe *p, const char *path, uint64_t *buffer, unsigned m
    return ok;
 }
 
-/* One mapped pass: the file sized first, then written through MAP_SHARED
- * windows of 64 MiB with no write() at all, each unmapped when full; fsync()
- * after the last. The kernel writes the dirty pages back itself. */
-static bool
-mapped_pass(struct file_probe *p, const char *path, unsigned mib, unsigned seconds)
+/* One of several threads writing a region of its own of one file at once. */
+struct write_lane {
+   int fd;
+   uint64_t offset;
+   uint64_t limit;
+   double seconds;
+   uint64_t written;
+   bool failed;
+};
+
+static void *
+write_lane_run(void *argument)
 {
-   const int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0666);
-   if (fd < 0) {
-      file_say(p, "routes mmap: open failed errno=%d", errno);
-      return false;
+   struct write_lane *lane = argument;
+   const size_t piece = 1u << 20;
+   uint64_t *const buffer = malloc(piece);
+   if (!buffer) {
+      lane->failed = true;
+      return NULL;
    }
-   const uint64_t window = 64u * 1024u * 1024u, segment = 256u * 1024u * 1024u;
-   const uint64_t total = (uint64_t)mib * 1024u * 1024u;
-   if (ftruncate(fd, (off_t)total) != 0) {
-      file_say(p, "routes mmap: ftruncate to %u MiB failed errno=%d", mib, errno);
-      close(fd);
-      unlink(path);
-      return false;
-   }
-   struct timespec start, mark;
+   struct timespec start;
    clock_gettime(CLOCK_MONOTONIC, &start);
-   mark = start;
-   uint64_t at = 0;
-   bool ok = true;
-   while (at < total) {
-      const size_t size = (size_t)(total - at < window ? total - at : window);
-      void *const view = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)at);
-      if (view == MAP_FAILED) {
-         file_say(p, "routes mmap: mmap at %llu failed errno=%d", (unsigned long long)at, errno);
-         ok = false;
+   while (lane->written < lane->limit && file_ms_since(&start) < lane->seconds * 1000.0) {
+      const uint64_t at = lane->offset + lane->written;
+      file_fill(buffer, at, piece);
+      if (pwrite(lane->fd, buffer, piece, (off_t)at) != (ssize_t)piece) {
+         lane->failed = true;
          break;
       }
-      file_fill(view, at, size);
-      munmap(view, size);
-      at += size;
-      if (at % segment == 0 || at == total) {
-         const double ms = file_ms_since(&mark);
-         const uint64_t bytes = at % segment ? at % segment : segment;
-         file_say(p, "routes mmap: %llu MiB, this segment %.1f MiB/s", (unsigned long long)(at >> 20),
-                  (double)bytes / 1048576.0 / (ms / 1000.0));
-         clock_gettime(CLOCK_MONOTONIC, &mark);
-         if (file_ms_since(&start) > seconds * 1000.0) {
-            file_say(p, "routes mmap: stopped after %u s", seconds);
-            break;
-         }
-      }
+      lane->written += piece;
+   }
+   free(buffer);
+   return NULL;
+}
+
+/* `count` threads at once, each writing its region of one file with pwrite()
+ * for `seconds` or its share of `bytes`; fsync() after them. */
+static bool
+writes_parallel(struct file_probe *p, const char *path, unsigned count, uint64_t bytes, unsigned seconds)
+{
+   struct write_lane lanes[16];
+   pthread_t threads[16];
+   if (count > 16)
+      count = 16;
+   const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+   if (fd < 0) {
+      file_say(p, "writes %u threads: open failed errno=%d", count, errno);
+      return false;
+   }
+   struct timespec start;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   for (unsigned i = 0; i < count; ++i) {
+      memset(&lanes[i], 0, sizeof(lanes[i]));
+      lanes[i].fd = fd;
+      lanes[i].limit = bytes / count;
+      lanes[i].offset = lanes[i].limit * i;
+      lanes[i].seconds = seconds;
+      pthread_create(&threads[i], NULL, write_lane_run, &lanes[i]);
+   }
+   uint64_t total = 0;
+   bool ok = true;
+   for (unsigned i = 0; i < count; ++i) {
+      pthread_join(threads[i], NULL);
+      total += lanes[i].written;
+      ok &= !lanes[i].failed;
    }
    const double written_ms = file_ms_since(&start);
    fsync(fd);
    const double synced_ms = file_ms_since(&start);
    close(fd);
    unlink(path);
-   file_say(p, "routes mmap: %llu MiB, %.1f MiB/s to the last unmap, %.1f MiB/s after fsync",
-            (unsigned long long)(at >> 20), (double)at / 1048576.0 / (written_ms / 1000.0),
-            (double)at / 1048576.0 / (synced_ms / 1000.0));
+   file_say(p, "writes %u threads at once: %llu MiB, %.1f MiB/s to the last write, %.1f MiB/s after fsync", count,
+            (unsigned long long)(total >> 20), (double)total / 1048576.0 / (written_ms / 1000.0),
+            (double)total / 1048576.0 / (synced_ms / 1000.0));
    return ok;
 }
 
@@ -378,11 +397,13 @@ ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const char 
       }
       file_say(&p, "routes begin directory=%s mib=%u seconds=%u", directories[i], mib, seconds);
       unlink(path);
-      /* write() first, long enough to spend a title's burst; then the mapped
-       * route; then write() again, which shows whether the mapped route spent
-       * what write() is allowed. */
+      /* write() first, long enough to spend a title's burst; then 1, 4 and 8
+       * threads writing at once, which says whether what is left is held per
+       * thread; then write() again. */
       p.failures += writes_pass(&p, path, buffer, mib, seconds, 0, false, "buffered") ? 0 : 1;
-      p.failures += mapped_pass(&p, path, mib, seconds) ? 0 : 1;
+      static const unsigned threads[3] = {1, 4, 8};
+      for (int t = 0; t < 3; ++t)
+         p.failures += writes_parallel(&p, path, threads[t], (uint64_t)mib << 20, seconds / 3 ? seconds / 3 : 1) ? 0 : 1;
       p.failures += writes_pass(&p, path, buffer, mib, seconds / 3 ? seconds / 3 : 1, 0, false, "buffered") ? 0 : 1;
    }
    munmap(buffer, FILE_PROBE_CHUNK_MAX);

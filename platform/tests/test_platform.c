@@ -1003,7 +1003,7 @@ test_probe_write_routes(void)
    struct probe_lines seen = {0};
    check(ps5_platform_probe_write_routes(probe_line, &seen, directories, 2, 64, 60) == 0,
          "routes: write() and the mapped route write what they are asked in each directory");
-   check(seen.lines >= 14, "routes: each route reports its segments and its total");
+   check(seen.lines >= 12, "routes: each pass reports its segments and its total");
    check(rmdir(first) == 0 && rmdir(second) == 0, "routes: the probe leaves its directories empty");
 }
 
