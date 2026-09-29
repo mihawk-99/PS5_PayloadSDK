@@ -666,6 +666,17 @@ test_libc_system(void)
    close(pipe_ends[1]);
    errno = 0;
    check(ps5_syscall(SYS_getpid) == -1 && errno == ENOSYS, "syscall: anything else is ENOSYS");
+   struct passwd entry, *found = &entry;
+   char passwd_buffer[256];
+   check(ps5_getpwnam_r("root", &entry, passwd_buffer, sizeof(passwd_buffer), &found) == 0 && found == NULL,
+         "getpwnam_r: no user");
+   check(!strcmp(ps5_strsignal(11), "Segmentation fault") && !strcmp(ps5_strsignal(99), "Unknown signal: 99"),
+         "strsignal: FreeBSD's descriptions");
+   void *const advised = mmap(NULL, 0x4000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+   check(ps5_posix_madvise(advised, 0x4000, POSIX_MADV_WILLNEED) == 0 &&
+            ps5_posix_madvise(advised, 0x4000, 12345) == EINVAL,
+         "posix_madvise: 0, or an error number");
+   munmap(advised, 0x4000);
    check(!strcmp(ps5_gai_strerror(EAI_FAIL), "Non-recoverable failure in name resolution") &&
             !strcmp(ps5_gai_strerror(EAI_AGAIN), "Temporary failure in name resolution") &&
             !strcmp(ps5_gai_strerror(9999), "Unknown error"),

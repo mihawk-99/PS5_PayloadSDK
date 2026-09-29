@@ -10,7 +10,8 @@
  *
  *   gmtime_r, localtime_r, utimensat, futimens, dirfd, clock_nanosleep,
  *   arc4random, arc4random_buf, arc4random_uniform, if_nameindex, strcasestr,
- *   memccpy, times, sockatmark, getpwuid, gethostbyaddr, tmpfile,
+ *   memccpy, times, sockatmark, getpwuid, getpwnam_r, posix_madvise, strsignal,
+ *   gethostbyaddr, tmpfile,
  *   if_nametoindex, if_indextoname, mkstemp, isatty, link, symlink, readlink,
  *   fchown
  *                          no system module exports them
@@ -104,6 +105,16 @@ char *ps5_strcasestr(const char *haystack, const char *needle);
  * NULL), as POSIX answers for a user it does not know. */
 int ps5_getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size, struct passwd **result);
 struct passwd *ps5_getpwuid(uid_t uid);
+/* The title has no user database: no user is found, by name either. */
+int ps5_getpwnam_r(const char *name, struct passwd *entry, char *buffer, size_t size,
+                   struct passwd **result);
+
+/* posix_madvise over madvise: an error number, not errno, as POSIX says. */
+int ps5_posix_madvise(void *address, size_t length, int advice);
+
+/* FreeBSD's description of a signal ("Segmentation fault"), or "Unknown
+ * signal: N" in a buffer of the calling thread's. */
+char *ps5_strsignal(int signal);
 
 /* Copies up to size bytes, stopping after the first byte equal to c; the
  * address after that byte, or NULL when it was not found. */

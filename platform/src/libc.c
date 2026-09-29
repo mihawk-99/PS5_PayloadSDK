@@ -20,6 +20,9 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
+#include <pwd.h>
+#include <stdio.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
 #include <sys/ioctl.h>
@@ -133,6 +136,45 @@ ps5_getpwuid(uid_t uid)
    (void)uid;
    errno = 0;
    return NULL;
+}
+
+int
+ps5_getpwnam_r(const char *name, struct passwd *entry, char *buffer, size_t size, struct passwd **result)
+{
+   (void)name;
+   (void)entry;
+   (void)buffer;
+   (void)size;
+   if (result)
+      *result = NULL;
+   return 0;
+}
+
+int
+ps5_posix_madvise(void *address, size_t length, int advice)
+{
+   return madvise(address, length, advice) == 0 ? 0 : errno;
+}
+
+char *
+ps5_strsignal(int signal)
+{
+   /* FreeBSD's sys_siglist, 1 to 32. */
+   static const char *const names[] = {
+      "Signal 0", "Hangup", "Interrupt", "Quit", "Illegal instruction", "Trace/BPT trap",
+      "Abort trap", "EMT trap", "Floating point exception", "Killed", "Bus error",
+      "Segmentation fault", "Bad system call", "Broken pipe", "Alarm clock", "Terminated",
+      "Urgent I/O condition", "Suspended (signal)", "Suspended", "Continued", "Child exited",
+      "Stopped (tty input)", "Stopped (tty output)", "I/O possible", "Cputime limit exceeded",
+      "Filesize limit exceeded", "Virtual timer expired", "Profiling timer expired",
+      "Window size changes", "Information request", "User defined signal 1",
+      "User defined signal 2", "Thread Scheduler",
+   };
+   if (signal >= 0 && signal < (int)(sizeof(names) / sizeof(names[0])))
+      return (char *)names[signal];
+   static _Thread_local char unknown[32];
+   snprintf(unknown, sizeof(unknown), "Unknown signal: %d", signal);
+   return unknown;
 }
 
 void *
