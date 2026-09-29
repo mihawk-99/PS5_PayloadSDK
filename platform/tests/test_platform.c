@@ -682,6 +682,10 @@ test_libc_system(void)
             (memcpy(&mask, set, 8), mask != 0) && !memcmp(set + 8, zero, 8),
          "affinity: read as a set, CPUs past 63 clear");
    check(ps5_pthread_setaffinity_np(pthread_self(), sizeof(set), set) == 0, "affinity: set back");
+   check(ps5_sysconf(_SC_NPROCESSORS_ONLN) == __builtin_popcountll(mask) &&
+            ps5_sysconf(_SC_NPROCESSORS_CONF) == __builtin_popcountll(mask) &&
+            ps5_sysconf(_SC_PAGESIZE) == sysconf(_SC_PAGESIZE),
+         "sysconf: the CPUs in the affinity mask; the rest as sysconf says");
    uint8_t none[16] = {0};
    check(ps5_pthread_setaffinity_np(pthread_self(), sizeof(none), none) == EINVAL,
          "affinity: no CPU is refused");

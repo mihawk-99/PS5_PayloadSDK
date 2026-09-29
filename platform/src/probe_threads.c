@@ -364,8 +364,9 @@ thread_scheduling(struct thread_probe *p)
    const int put_set = got_set == 0 ? ps5_pthread_setaffinity_np(pthread_self(), sizeof(set), set) : -1;
    size_t page_sizes[2] = {0, 0};
    const int page_count = ps5_getpagesizes(page_sizes, 2);
-   thread_say(p, "scheduling platform getaffinity=%d mask=%#llx setaffinity=%d getpagesizes=%d:%zu", got_set,
-              (unsigned long long)set_low, put_set, page_count, page_sizes[0]);
+   thread_say(p, "scheduling platform getaffinity=%d mask=%#llx setaffinity=%d getpagesizes=%d:%zu sysconf_cpus=%ld",
+              got_set, (unsigned long long)set_low, put_set, page_count, page_sizes[0],
+              ps5_sysconf(_SC_NPROCESSORS_ONLN));
 }
 
 int

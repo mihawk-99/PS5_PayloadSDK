@@ -233,6 +233,26 @@ ps5_pthread_getaffinity_np(pthread_t thread, size_t size, void *set)
    return 0;
 }
 
+long
+ps5_sysconf(int name)
+{
+   if (name == _SC_NPROCESSORS_ONLN || name == _SC_NPROCESSORS_CONF) {
+      /* Read once: a thread that later narrows its own affinity does not
+       * change what the title has. */
+      static atomic_long cpus;
+      long known = atomic_load(&cpus);
+      if (known > 0)
+         return known;
+      uint64_t mask = 0;
+      if (scePthreadGetaffinity(pthread_self(), &mask) == 0 && mask != 0) {
+         known = __builtin_popcountll(mask);
+         atomic_store(&cpus, known);
+         return known;
+      }
+   }
+   return sysconf(name);
+}
+
 int
 ps5_pthread_setaffinity_np(pthread_t thread, size_t size, const void *set)
 {
