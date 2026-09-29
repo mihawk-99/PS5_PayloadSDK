@@ -20,6 +20,9 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <limits.h>
 #if defined(__linux__)
 #include <sys/vfs.h>
 #else
@@ -368,6 +371,77 @@ ps5_pthread_getaffinity_np(pthread_t thread, size_t size, void *set)
    memset(set, 0, size);
    memcpy(set, &mask, size < sizeof(mask) ? size : sizeof(mask));
    return 0;
+}
+
+char *
+ps5_realpath(const char *path, char *resolved)
+{
+   if (!path) {
+      errno = EINVAL;
+      return NULL;
+   }
+   if (!*path) {
+      errno = ENOENT;
+      return NULL;
+   }
+   char work[PATH_MAX];
+   size_t length = 0;
+   if (path[0] != '/') {
+      if (!ps5_getcwd(work, sizeof(work)))
+         return NULL;
+      length = strlen(work);
+      while (length > 0 && work[length - 1] == '/')
+         length--;
+   }
+   for (const char *at = path; *at;) {
+      while (*at == '/')
+         at++;
+      if (!*at)
+         break;
+      const char *const slash = strchr(at, '/');
+      const size_t size = slash ? (size_t)(slash - at) : strlen(at);
+      if (size == 1 && at[0] == '.') {
+         /* the same directory */
+      } else if (size == 2 && at[0] == '.' && at[1] == '.') {
+         while (length > 0 && work[length - 1] != '/')
+            length--;
+         if (length > 0)
+            length--;
+      } else {
+         if (length + 1 + size >= sizeof(work)) {
+            errno = ENAMETOOLONG;
+            return NULL;
+         }
+         work[length++] = '/';
+         memcpy(work + length, at, size);
+         length += size;
+         work[length] = 0;
+         struct stat status;
+         if (stat(work, &status) != 0)
+            return NULL;
+         bool more = false;
+         for (const char *rest = at + size; *rest; rest++)
+            if (*rest != '/') {
+               more = true;
+               break;
+            }
+         if (more && !S_ISDIR(status.st_mode)) {
+            errno = ENOTDIR;
+            return NULL;
+         }
+      }
+      at += size;
+   }
+   if (length == 0)
+      work[length++] = '/';
+   work[length] = 0;
+   char *const out = resolved ? resolved : malloc(PATH_MAX);
+   if (!out) {
+      errno = ENOMEM;
+      return NULL;
+   }
+   memcpy(out, work, length + 1);
+   return out;
 }
 
 long

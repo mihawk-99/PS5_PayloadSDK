@@ -20,6 +20,7 @@
  * removed after each pass. Only libc is used, so the host tests run it too.
  */
 #include "ps5platform/probe.h"
+#include "ps5platform/libc.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -200,6 +201,26 @@ ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *direct
    }
    uint64_t *const buffer = mapped;
    file_say(&p, "begin directory=%s bytes=%u", directory, FILE_PROBE_BYTES);
+   /* What realpath answers a title (std::filesystem's canonical paths are
+    * built on it): the directory, a path below it that does not exist, and
+    * one with a "." and a "..". */
+   const char *const resolve[3] = {directory, "missing-probe-entry", "./x/.."};
+   for (unsigned i = 0; i < 3; i++) {
+      char asked[600], answer[1024];
+      if (i == 0)
+         snprintf(asked, sizeof(asked), "%s", directory);
+      else
+         snprintf(asked, sizeof(asked), "%s/%s", directory, resolve[i]);
+      memset(answer, 0x55, sizeof(answer));
+      errno = 0;
+      const char *const got = realpath(asked, answer);
+      file_say(&p, "realpath '%s' -> %s '%.200s' errno=%d", asked, got ? "ok" : "NULL",
+               got ? got : "", errno);
+   }
+   char resolved[1024];
+   const bool resolves = ps5_realpath(directory, resolved) && !strcmp(resolved, directory);
+   p.failures += resolves ? 0 : 1;
+   file_say(&p, "check %s the platform's realpath resolves %s", resolves ? "PASS" : "FAIL", directory);
    static const size_t chunks[] = {100u * 1024u, 1024u * 1024u, FILE_PROBE_CHUNK_MAX};
    for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++) {
       const bool passed = file_pass(&p, path, buffer, chunks[i], 0, "buffered");

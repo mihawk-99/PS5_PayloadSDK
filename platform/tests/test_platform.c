@@ -25,6 +25,7 @@ extern int host_empty_decimal_point;
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <locale.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -666,6 +667,20 @@ test_libc_system(void)
    close(pipe_ends[1]);
    errno = 0;
    check(ps5_syscall(SYS_getpid) == -1 && errno == ENOSYS, "syscall: anything else is ENOSYS");
+   char ours[PATH_MAX], theirs[PATH_MAX];
+   check(ps5_realpath(".", ours) && realpath(".", theirs) && !strcmp(ours, theirs),
+         "realpath: the working directory");
+   check(ps5_realpath("/tmp/../tmp//./", ours) && !strcmp(ours, "/tmp"), "realpath: . and .. by name");
+   check(ps5_realpath("/", ours) && !strcmp(ours, "/") && ps5_realpath("/..", ours) && !strcmp(ours, "/"),
+         "realpath: the root, and nothing above it");
+   errno = 0;
+   check(!ps5_realpath("/tmp/no-such-entry-for-ps5-tests", ours) && errno == ENOENT,
+         "realpath: a missing entry is ENOENT");
+   errno = 0;
+   check(!ps5_realpath("/etc/passwd/x", ours) && errno == ENOTDIR, "realpath: a file with more below it");
+   char *const allocated = ps5_realpath("/tmp", NULL);
+   check(allocated && !strcmp(allocated, "/tmp"), "realpath: allocated when no buffer is given");
+   free(allocated);
    struct stat own;
    check(stat(".", &own) == 0, "statfs: a path to ask about");
    char volume[512];
@@ -961,7 +976,8 @@ test_probe_files(void)
    struct probe_lines seen = {0};
    check(ps5_platform_probe_files(probe_line, &seen, directory) == 0,
          "files: the probe reports no failure");
-   check(seen.passes == 6, "files: every chunk size and stdio buffer reads back what it wrote");
+   check(seen.passes == 7,
+         "files: every chunk size and stdio buffer reads back what it wrote, and realpath resolves the directory");
    check(rmdir(directory) == 0, "files: the probe leaves its directory empty");
 }
 
