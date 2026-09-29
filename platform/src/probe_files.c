@@ -444,9 +444,12 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
       server_directory = directory;
    file_say(&p, "offload %s: the server names it %s", directory, server_directory);
 #endif
+   /* "/dev/null" as the server's folder sends the bytes to its null device:
+    * the route's own rate, with no storage behind it (nothing to check). */
+   const bool sink = !strcmp(server_directory, "/dev/null");
    char path[512], server_path[512];
    if (snprintf(path, sizeof(path), "%s/%s", directory, FILE_PROBE_NAME) >= (int)sizeof(path) ||
-       snprintf(server_path, sizeof(server_path), "%s/%s", server_directory, FILE_PROBE_NAME) >=
+       snprintf(server_path, sizeof(server_path), sink ? "%s" : "%s/%s", server_directory, FILE_PROBE_NAME) >=
           (int)sizeof(server_path)) {
       file_say(&p, "offload: directory name too long");
       return 1;
@@ -526,10 +529,13 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    /* The title's descriptor sees what the server wrote: the same file, its
     * size, and the bytes at the start, the middle and the end. */
    struct stat after;
-   const bool same = fstat(fd, &after) == 0 && after.st_ino == before.st_ino && (uint64_t)after.st_size == at;
+   const bool same =
+      sink || (fstat(fd, &after) == 0 && after.st_ino == before.st_ino && (uint64_t)after.st_size == at);
+   if (sink)
+      after.st_size = 0;
    bool content = true;
    const uint64_t probes[3] = {first - 4096, at / 2 & ~(uint64_t)4095, at - 4096};
-   for (int i = 0; i < 3 && same; ++i) {
+   for (int i = 0; i < 3 && same && !sink; ++i) {
       uint64_t expected[512], seen[512];
       file_fill(expected, probes[i], sizeof(expected));
       content &= pread(fd, seen, sizeof(seen), (off_t)probes[i]) == (ssize_t)sizeof(seen) &&
