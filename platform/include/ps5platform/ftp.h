@@ -38,6 +38,14 @@ int ps5_ftp_command(struct ps5_ftp *ftp, const char *format, ...) __attribute__(
  * the same file). Returns the data connection to send the bytes on, or -1. */
 int ps5_ftp_append_begin(struct ps5_ftp *ftp, const char *path);
 
+/* The size of the server's file `path`, or -1. */
+long long ps5_ftp_size(struct ps5_ftp *ftp, const char *path);
+
+/* Calls `entry` for each name in the server's folder `path` (LIST), with
+ * whether it is a folder. Returns 0 when the listing completed, or -1. */
+int ps5_ftp_list(struct ps5_ftp *ftp, const char *path, void (*entry)(void *context, const char *name, int directory),
+                 void *context);
+
 /* Sends all of `bytes` on a data connection. Returns 0, or -1. */
 int ps5_ftp_send(int data, const void *bytes, size_t size);
 

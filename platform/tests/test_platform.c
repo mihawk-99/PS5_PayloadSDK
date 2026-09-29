@@ -16,6 +16,7 @@ extern int host_empty_decimal_point;
 #include "ps5platform/exec.h"
 #include "ps5platform/fp.h"
 #include "ps5platform/ftp.h"
+#include "ps5platform/offload.h"
 #include "ps5platform/heap.h"
 #include "ps5platform/klog.h"
 #include "ps5platform/kernel.h"
@@ -24,6 +25,7 @@ extern int host_empty_decimal_point;
 #include "ps5platform/probe.h"
 #include "ps5platform/shm.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -1078,6 +1080,34 @@ fake_ftp_session(struct fake_ftp *server, int control)
          data_listener = -1;
          __atomic_fetch_add(&server->appended, 1, __ATOMIC_SEQ_CST);
          fake_ftp_say(control, "226 done\r\n");
+      } else if (!strncmp(line, "SIZE ", 5)) {
+         struct stat status;
+         char reply[64];
+         if (stat(line + 5, &status) == 0 && S_ISREG(status.st_mode))
+            snprintf(reply, sizeof(reply), "213 %lld\r\n", (long long)status.st_size);
+         else
+            snprintf(reply, sizeof(reply), "550 no such file\r\n");
+         fake_ftp_say(control, reply);
+      } else if (!strncmp(line, "LIST ", 5) && data_listener >= 0) {
+         fake_ftp_say(control, "150 listing\r\n");
+         const int data = accept(data_listener, NULL, NULL);
+         DIR *folder = opendir(line + 5);
+         struct dirent *entry;
+         while (data >= 0 && folder && (entry = readdir(folder))) {
+            char path[1200], row[400];
+            struct stat status;
+            snprintf(path, sizeof(path), "%s/%s", line + 5, entry->d_name);
+            const int directory = stat(path, &status) == 0 && S_ISDIR(status.st_mode);
+            snprintf(row, sizeof(row), "%s 1 0 0 0 Jan 1 00:00 %s\r\n", directory ? "drwxrwxrwx" : "-rw-rw-rw-",
+                     entry->d_name);
+            fake_ftp_say(data, row);
+         }
+         if (folder)
+            closedir(folder);
+         close(data);
+         close(data_listener);
+         data_listener = -1;
+         fake_ftp_say(control, "226 listed\r\n");
       } else if (!strncmp(line, "QUIT", 4)) {
          fake_ftp_say(control, "221 bye\r\n");
          return true;
@@ -1144,6 +1174,77 @@ test_probe_ftp_offload(void)
          "offload: an APPE for each way to the server's file, each lane, and the caller's file");
    check(seen.lines >= 3, "offload: the probe reports statfs, its segments and its total");
    check(rmdir(directory) == 0, "offload: the probe leaves its directory empty");
+}
+
+/* The offload streams (src/offload.c) against the fake server: the folder a
+ * marker is found in, a file finished through a stream, and the budget. */
+static void
+test_offload(void)
+{
+   char parent[] = "/tmp/ps5-platform-offload-root-XXXXXX";
+   check(mkdtemp(parent) != NULL, "offload streams: a folder of their own");
+   char title[600], other[600];
+   snprintf(title, sizeof(title), "%s/title", parent);
+   snprintf(other, sizeof(other), "%s/another", parent);
+   check(mkdir(title, 0777) == 0 && mkdir(other, 0777) == 0, "offload streams: a title's folder beside another");
+   struct fake_ftp server = {0};
+   server.listener = fake_ftp_listen(&server.port);
+   pthread_t thread;
+   check(pthread_create(&thread, NULL, fake_ftp_serve, &server) == 0, "offload streams: the fake server runs");
+   /* The scan starts at port 1; the cache names the fake server's port so the
+    * test does not scan the host's. */
+   char cache[700];
+   snprintf(cache, sizeof(cache), "%s/.ps5-offload", title);
+   FILE *hint = fopen(cache, "w");
+   check(hint != NULL, "offload streams: a cached port");
+   fprintf(hint, "%u %s\n", server.port, other);
+   fclose(hint);
+   const char *const roots[] = {parent};
+   check(ps5_offload_setup(title, roots, 1) == 0, "offload streams: the server's view of the title's folder is found");
+   check(ps5_offload_setup(title, roots, 1) == 0, "offload streams: setup is done once");
+   hint = fopen(cache, "r");
+   char kept[700] = {0};
+   unsigned port = 0;
+   check(hint && fscanf(hint, "%u %699[^\n]", &port, kept) == 2 && port == server.port && !strcmp(kept, title),
+         "offload streams: the cache corrects the folder it named");
+   if (hint)
+      fclose(hint);
+
+   char path[700];
+   snprintf(path, sizeof(path), "%s/big.bin", title);
+   const int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0666);
+   const size_t head = 3u << 20, tail = 40u << 20;
+   unsigned char *bytes = malloc(head + tail);
+   for (size_t i = 0; i < head + tail; ++i)
+      bytes[i] = (unsigned char)(i * 131u + (i >> 16));
+   check(fd >= 0 && write(fd, bytes, head) == (ssize_t)head, "offload streams: the file's start written directly");
+   struct ps5_offload *stream = ps5_offload_begin(path, head);
+   check(stream != NULL, "offload streams: a stream to a file of the title's folder");
+   bool queued = stream != NULL;
+   for (size_t done = 0; stream && done < tail; done += 65536)
+      queued &= ps5_offload_write(stream, bytes + head + done, 65536) == 0;
+   check(queued, "offload streams: 40 MiB queued in 64 KiB writes");
+   check(stream && ps5_offload_end(stream) == 0, "offload streams: every byte is in the file");
+   struct stat status;
+   check(fstat(fd, &status) == 0 && (size_t)status.st_size == head + tail, "offload streams: the file's whole size");
+   unsigned char *back = malloc(head + tail);
+   check(pread(fd, back, head + tail, 0) == (ssize_t)(head + tail) && !memcmp(back, bytes, head + tail),
+         "offload streams: the file holds the bytes in order");
+   free(back);
+   free(bytes);
+   close(fd);
+   unlink(path);
+   check(ps5_offload_begin("/elsewhere/file", 0) == NULL, "offload streams: none outside the title's folder");
+
+   check(!ps5_offload_wanted(), "offload streams: not wanted while writes are fast");
+   ps5_offload_note_write(16u << 20, 8000.0);
+   check(ps5_offload_wanted(), "offload streams: wanted once a 16 MiB write takes 8 s");
+
+   shutdown(server.listener, SHUT_RDWR);
+   pthread_join(thread, NULL);
+   close(server.listener);
+   unlink(cache);
+   check(rmdir(title) == 0 && rmdir(other) == 0 && rmdir(parent) == 0, "offload streams: nothing is left behind");
 }
 
 static void
@@ -1746,6 +1847,7 @@ main(void)
    test_probe_writes();
    test_probe_write_routes();
    test_probe_ftp_offload();
+   test_offload();
    printf("%s\n", "test_probe_threads");
    fflush(stdout);
    test_probe_threads();

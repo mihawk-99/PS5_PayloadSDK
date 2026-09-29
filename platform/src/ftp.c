@@ -118,8 +118,10 @@ ps5_ftp_open(struct ps5_ftp *ftp, unsigned port)
    return 0;
 }
 
-int
-ps5_ftp_append_begin(struct ps5_ftp *ftp, const char *path)
+/* A passive data connection, then `command` on it; the data connection when
+ * the server starts the transfer, or -1. */
+static int
+ftp_transfer_begin(struct ps5_ftp *ftp, const char *command, const char *path)
 {
    if (ps5_ftp_command(ftp, "PASV") != 227)
       return -1;
@@ -132,11 +134,65 @@ ps5_ftp_append_begin(struct ps5_ftp *ftp, const char *path)
    const int data = ftp_connect_local(p[0] * 256 + p[1]);
    if (data < 0)
       return -1;
-   const int code = ps5_ftp_command(ftp, "APPE %s", path);
+   const int code = ps5_ftp_command(ftp, "%s %s", command, path);
    if (code != 150 && code != 125) {
       close(data);
       return -1;
    }
+   return data;
+}
+
+long long
+ps5_ftp_size(struct ps5_ftp *ftp, const char *path)
+{
+   if (ps5_ftp_command(ftp, "SIZE %s", path) != 213)
+      return -1;
+   return strtoll(ftp->reply + 4, NULL, 10);
+}
+
+int
+ps5_ftp_list(struct ps5_ftp *ftp, const char *path, void (*entry)(void *context, const char *name, int directory),
+             void *context)
+{
+   const int data = ftp_transfer_begin(ftp, "LIST", path);
+   if (data < 0)
+      return -1;
+   char line[1024];
+   size_t used = 0;
+   char block[4096];
+   ssize_t got;
+   while ((got = recv(data, block, sizeof(block), 0)) > 0) {
+      for (ssize_t i = 0; i < got; ++i) {
+         const char c = block[i];
+         if (c != '\n') {
+            if (c != '\r' && used + 1 < sizeof(line))
+               line[used++] = c;
+            continue;
+         }
+         line[used] = '\0';
+         used = 0;
+         /* "drwxrwxrwx 1 0 0 65536 Jan 23 11:44 name": the name follows
+          * eight fields. */
+         const char *name = line;
+         for (int field = 0; field < 8 && *name; ++field) {
+            while (*name && *name != ' ')
+               ++name;
+            while (*name == ' ')
+               ++name;
+         }
+         if (*name && strcmp(name, ".") && strcmp(name, ".."))
+            entry(context, name, line[0] == 'd');
+      }
+   }
+   return ps5_ftp_transfer_end(ftp, data);
+}
+
+int
+ps5_ftp_append_begin(struct ps5_ftp *ftp, const char *path)
+{
+   const int data = ftp_transfer_begin(ftp, "APPE", path);
+   if (data < 0)
+      return -1;
    const int size = 4 << 20, on = 1;
    setsockopt(data, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
    /* The server's writes to storage fill its receive window; with Nagle's
