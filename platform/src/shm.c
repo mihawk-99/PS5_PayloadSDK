@@ -37,6 +37,18 @@ ps5_shm_create(size_t bytes, struct ps5_shm *shm)
                                                         &start);
    if (result != 0)
       return result;
+   /* Direct memory comes back with what it held before (docs/PROBE.md); a new
+    * object reads zero, as a POSIX shared-memory object does. */
+   void *view = NULL;
+   const int32_t mapped = ps5p_map_placed(start, rounded, 0,
+                                          PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE,
+                                          PS5_SHM_NO_PLACE, &view);
+   if (mapped != 0) {
+      sceKernelReleaseDirectMemory(start, rounded);
+      return mapped;
+   }
+   memset(view, 0, rounded);
+   sceKernelMunmap(view, rounded);
    shm->direct_start = start;
    shm->bytes = rounded;
    atomic_fetch_add(&objects, 1);
@@ -308,6 +320,8 @@ ps5_vrange_commit(void *address, size_t bytes, int protection)
          sceKernelReleaseDirectMemory(start, PS5P_DIRECT_UNIT);
          break;
       }
+      /* Direct memory comes back with what it held before (docs/PROBE.md). */
+      memset(mapped, 0, PS5P_DIRECT_UNIT);
       unit_insert(at, start, wanted);
       atomic_fetch_add(&committed_bytes, PS5P_DIRECT_UNIT);
       /* The unit's pages outside the range stay without access. */

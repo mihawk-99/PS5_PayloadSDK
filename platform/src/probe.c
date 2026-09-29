@@ -1292,6 +1292,7 @@ probe_emulator_layout(struct probe *p)
       }
    }
    bool kept = false, zeroed = false;
+   unsigned kept_a = 0, kept_b = 0, after_a = 0, after_b = 0;
    if (exec) {
       uint8_t *const across = exec + ((size_t)6 << 30) - 0x4000;
       if (ps5_vrange_commit(across, 0x8000, PS5_SHM_READ | PS5_SHM_WRITE) == 0) {
@@ -1299,8 +1300,12 @@ probe_emulator_layout(struct probe *p)
          across[0x4000] = 0x22;
          kept = ps5_vrange_commit(across, 0x8000, PS5_SHM_READ) == 0 && across[0] == 0x11 &&
                 across[0x4000] == 0x22;
+         kept_a = across[0];
+         kept_b = across[0x4000];
          ps5_vrange_decommit(across - 0xc000, 0x10000);
          ps5_vrange_commit(across - 0xc000, 0x10000, PS5_SHM_READ | PS5_SHM_WRITE);
+         after_a = across[0];
+         after_b = across[0x4000];
          zeroed = across[0] == 0 && across[0x4000] == 0x22;
          ps5_vrange_decommit(across - 0xc000, 0x20000);
       }
@@ -1315,6 +1320,33 @@ probe_emulator_layout(struct probe *p)
    say(p, "layout commit pieces=%u ran=%u commit_ns_each=%llu decommit_ns_each=%llu committed_left=%llu after_release=%llu",
        (unsigned)PIECES, ran, (unsigned long long)(commit_ns / PIECES), (unsigned long long)(decommit_ns / PIECES),
        (unsigned long long)committed_before_release, (unsigned long long)stats.committed_bytes);
+   say(p, "layout commit kept=%#x/%#x after_decommit=%#x/%#x", kept_a, kept_b, after_a, after_b);
+
+   /* The kernel's own answer: direct memory written, released and allocated
+    * again, as the next allocation of the same size gets it. */
+   int64_t first = -1, second = -1;
+   unsigned stale = 0x100;
+   if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), 0x10000, 0x10000,
+                                     PS5_KERNEL_DIRECT_TYPE_CPU, &first) == 0) {
+      void *view = (void *)(uintptr_t)0x1000000000ull;
+      if (sceKernelMapDirectMemory(&view, 0x10000, PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE, 0,
+                                   first, 0x10000) == 0) {
+         memset(view, 0x5a, 0x10000);
+         sceKernelMunmap(view, 0x10000);
+      }
+      sceKernelReleaseDirectMemory(first, 0x10000);
+      if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), 0x10000, 0x10000,
+                                        PS5_KERNEL_DIRECT_TYPE_CPU, &second) == 0) {
+         view = (void *)(uintptr_t)0x1000000000ull;
+         if (sceKernelMapDirectMemory(&view, 0x10000, PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE, 0,
+                                      second, 0x10000) == 0) {
+            stale = ((volatile uint8_t *)view)[0x1234];
+            sceKernelMunmap(view, 0x10000);
+         }
+         sceKernelReleaseDirectMemory(second, 0x10000);
+      }
+   }
+   say(p, "layout direct reuse same_start=%d byte_after_reuse=%#x", first == second, stale);
    check(p, placed == COUNT, "an emulator's 56 GiB guest layout (8, 12, 32 and 4 GiB) reserved from 64 GiB up");
    check(p, ran == PIECES, "64 KiB pieces committed read-write-execute in a reservation run code");
    check(p, kept && zeroed, "a commit keeps what is committed; a decommitted unit reads zero at its next commit");
@@ -1337,6 +1369,21 @@ probe_emulator_layout(struct probe *p)
 static _Thread_local volatile uint64_t probe_tls_value;
 static volatile uint64_t probe_global_value;
 
+/* One read each, never inlined, so every read looks the variable up. */
+__attribute__((noinline)) static uint64_t
+probe_read_tls(void)
+{
+   __asm__ volatile("" ::: "memory");
+   return probe_tls_value;
+}
+
+__attribute__((noinline)) static uint64_t
+probe_read_global(void)
+{
+   __asm__ volatile("" ::: "memory");
+   return probe_global_value;
+}
+
 static void
 probe_tls_cost(struct probe *p)
 {
@@ -1344,12 +1391,12 @@ probe_tls_cost(struct probe *p)
    uint64_t sum = 0;
    uint64_t t = sceKernelReadTsc();
    for (unsigned i = 0; i < READS; i++)
-      sum += probe_global_value;
+      sum += probe_read_global();
    const uint64_t global_ns = ns_since(p, t);
    probe_tls_value = 1;
    t = sceKernelReadTsc();
    for (unsigned i = 0; i < READS; i++)
-      sum += probe_tls_value;
+      sum += probe_read_tls();
    const uint64_t tls_ns = ns_since(p, t);
    say(p, "tls reads=%u global_ns=%llu tls_ns=%llu tls_ns_each_x1000=%llu sum=%llu", (unsigned)READS,
        (unsigned long long)global_ns, (unsigned long long)tls_ns,

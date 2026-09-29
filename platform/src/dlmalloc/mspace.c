@@ -24,6 +24,9 @@ int ps5p_heap_unmap(void *address, size_t bytes);
 #define MMAP(s) ps5p_heap_map(s)
 #define DIRECT_MMAP(s) ps5p_heap_map(s)
 #define MUNMAP(a, s) ps5p_heap_unmap((a), (s))
+/* Direct memory comes back with what it held before (docs/PROBE.md), so a
+ * mapped chunk is not known to be clear: calloc clears it. */
+#define MMAP_CLEARS 0
 /* The PS5 target's __STDCPP_DEFAULT_NEW_ALIGNMENT__ and __BIGGEST_ALIGNMENT__
  * are 32: its compilers emit 32-byte-aligned AVX stores into plain new
  * objects. */

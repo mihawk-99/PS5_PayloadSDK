@@ -501,6 +501,8 @@ test_shm(void)
    check(ps5_shm_map(&shm, 0, 3 << 20, NULL, PS5_SHM_READ | PS5_SHM_WRITE, 0, &a) == 0 &&
             outside_window(a, 3 << 20),
          "shm: a view, placed");
+   check(((volatile uint8_t *)a)[0] == 0 && ((volatile uint8_t *)a)[(3 << 20) - 1] == 0,
+         "shm: a new object reads zero");
    check(ps5_shm_map(&shm, 1 << 20, 1 << 20, NULL, PS5_SHM_READ | PS5_SHM_WRITE, 0, &b) == 0 &&
             a != b,
          "shm: a second view of its middle");
@@ -568,8 +570,9 @@ test_vrange_commit(void)
    uint8_t *base = NULL;
    check(ps5_vrange_reserve(1 << 20, NULL, 0x10000, (void **)&base) == 0, "commit: a range");
    struct ps5_shm_stats stats;
-   check(ps5_vrange_commit(base + 0x4000, 0x8000, PS5_SHM_READ | PS5_SHM_WRITE) == 0,
-         "commit: two pages");
+   check(ps5_vrange_commit(base + 0x4000, 0x8000, PS5_SHM_READ | PS5_SHM_WRITE) == 0 &&
+            base[0x4000] == 0 && base[0xbfff] == 0,
+         "commit: two pages, reading zero");
    ps5_shm_live(&stats);
    check(stats.committed_bytes == 0x10000, "commit: backed by one unit");
    check(!strcmp(host_protection(base + 0x4000), "rw-") &&
@@ -1478,6 +1481,17 @@ test_heap(void)
       handed_intact &= result != NULL;
    }
    check(handed_intact, "heap: blocks go back to their own arena from other threads");
+   /* A large calloc is its own mapping (dlmalloc's threshold is 32 MiB),
+    * from direct memory that may hold what it held before: cleared all the
+    * same, written, freed and asked for again. */
+   for (int round = 0; round < 2; round++) {
+      uint8_t *const large = __wrap_calloc(1, (size_t)40 << 20);
+      check(large && large[0] == 0 && large[((size_t)40 << 20) - 1] == 0 && large[(size_t)17 << 20] == 0,
+            "heap: a large calloc reads zero");
+      if (large)
+         memset(large, 0x77, (size_t)40 << 20);
+      __wrap_free(large);
+   }
 }
 
 static void

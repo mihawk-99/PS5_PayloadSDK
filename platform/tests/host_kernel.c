@@ -115,6 +115,13 @@ sceKernelAllocateDirectMemory(int64_t search_start, int64_t search_end, size_t l
          memset(used + first, 1, (size_t)units);
          allocations++;
          pthread_mutex_unlock(&lock);
+         /* Nothing promises the memory is clear (the console hands released
+          * memory out as it was): a pattern, so code that assumes zero shows. */
+         static uint8_t pattern[UNIT];
+         memset(pattern, 0xa5, sizeof(pattern));
+         for (int64_t unit = 0; unit < units; unit++)
+            if (pwrite(memory_fd, pattern, sizeof(pattern), (first + unit) * UNIT) != (ssize_t)sizeof(pattern))
+               return FAILED;
          *physical_start = first * UNIT;
          return 0;
       }
@@ -131,8 +138,8 @@ sceKernelReleaseDirectMemory(int64_t start, size_t length)
    memset(used + start / UNIT, 0, length / (size_t)UNIT);
    allocations--;
    pthread_mutex_unlock(&lock);
-   /* The pages' contents go with the allocation, as on the console. */
-   fallocate(memory_fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, start, (off_t)length);
+   /* The pages keep what they held: the console gives released direct memory
+    * out again as it was (docs/PROBE.md). */
    return 0;
 }
 

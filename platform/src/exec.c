@@ -113,6 +113,9 @@ ps5_exec_alloc(const struct ps5_exec_request *request, struct ps5_exec_region *r
       sceKernelReleaseDirectMemory(start, bytes);
       return result;
    }
+   /* Direct memory comes back with what it held before (docs/PROBE.md); a
+    * region reads zero, as a fresh mapping does. */
+   memset(base, 0, bytes);
    const int protection = (request->flags & PS5_EXEC_TOGGLED)     ? PROT_RW
                           : (request->flags & PS5_EXEC_DUAL_VIEW) ? PROT_RX
                                                                   : PROT_RWX;

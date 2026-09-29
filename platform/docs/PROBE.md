@@ -106,7 +106,31 @@ What `sceKernelReserveVirtualRange` grants, measured with ranges of 1 to
   itself**, and nothing at or above 0x100_0000_0000 (1 TiB) is granted.
 
 Ranges larger than the view area holds (guest-memory arenas above all) belong
-at 0x10_0000_0000 and above.
+at 0x10_0000_0000 and above. An emulator's whole guest layout fits there:
+RPCS3's 8, 12, 32 and 4 GiB ranges were reserved one after another from
+0x10_0000_0000 (at 0x10, 0x12, 0x15 and 0x1D_0000_0000), and
+`ps5_vrange_reserve_at` reserves 8 GiB exactly at 0x10_0000_0000 and refuses
+it a second time (2026-09-28, RetroArch title).
+
+**Released direct memory is given out again as it was.** 64 KiB written with
+0x5a, released and allocated again came back at the same start still reading
+0x5a. Nothing the kernel hands out is known to be clear, so the platform zeroes
+what it promises is fresh: a new `ps5_shm` object, a unit
+`ps5_vrange_commit` backs, a region `ps5_exec_alloc` maps, and the title
+heap's large `calloc` (dlmalloc's `MMAP_CLEARS` is off). The host tests' model
+hands out a pattern, not zeros.
+
+Committed memory (`ps5_vrange_commit`): 64 pieces of 64 KiB committed
+read-write-execute in a 12 GiB reservation ran code, at 30 us a commit and
+14 us a decommit; a commit over committed memory kept its contents, and every
+committed unit went back with its reservation.
+
+## Thread-local storage
+
+A title's `_Thread_local` goes through emulated TLS (`__emutls_get_address`;
+the SDK builds with `-femulated-tls`). A read of one, through a call that is
+never inlined, took 4.7 ns against 1.3 ns for a global read the same way:
+about 3.4 ns for the lookup (a million reads each, 2026-09-28).
 
 ## The shared-memory JIT interface
 
@@ -159,6 +183,18 @@ Vulkan instance setup, one page below the thread's stack (its PHASE_LOG,
 2026-09-26). A thread that runs code it did not write -- a frontend's, an
 emulator core's -- should ask for its stack; the title gives RetroArch's own
 threads and the cores' 2 MiB.
+
+What a title reads about its CPUs (2026-09-28, RetroArch title):
+
+- `sysconf(_SC_NPROCESSORS_ONLN)` and `_SC_NPROCESSORS_CONF` answer 16, but a
+  title's threads run on thirteen, CPUs 0 to 12 (affinity mask 0x1fff).
+- `sysconf(_SC_PAGESIZE)` answers 16384.
+- `pthread_getaffinity_np` answers for set sizes of 8 and 16 bytes and returns
+  ERANGE (34) for 32 bytes and more. FreeBSD's `cpuset_t` is 32 bytes, so code
+  built on FreeBSD's headers always gets ERANGE.
+- `scePthreadGetaffinity` and `scePthreadSetaffinity` round-trip the 64-bit
+  mask. `ps5_pthread_getaffinity_np` and `ps5_pthread_setaffinity_np`, built on
+  them, answer a 32-byte set with 0x1fff and set it back.
 
 ## Numbers and the floating-point state
 

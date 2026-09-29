@@ -39,7 +39,8 @@
  *   accept4, getpagesizes, in6addr_any
  *                          no system module exports them
  *   pthread_getaffinity_np, pthread_setaffinity_np
- *                          exported, but FreeBSD's cpuset_t is refused (ERANGE):
+ *                          exported, but refuse sets larger than 16 bytes
+ *                          (ERANGE), FreeBSD's 32-byte cpuset_t among them:
  *                          the exported 64-bit mask form answers instead
  *
  * They carry a ps5_ prefix: a title that defined libc's own names would
