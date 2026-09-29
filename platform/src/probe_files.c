@@ -422,7 +422,7 @@ ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *direc
  * when the server refused or did not confirm. */
 static uint64_t
 offload_send(struct file_probe *p, struct ps5_ftp *ftp, const char *server_path, uint64_t *buffer,
-             uint64_t at, uint64_t total, unsigned seconds, const char *how)
+             uint64_t at, uint64_t total, unsigned seconds, size_t send_size, double pace_mibs, const char *how)
 {
    const int data = ps5_ftp_append_begin(ftp, server_path);
    if (data < 0) {
@@ -436,7 +436,16 @@ offload_send(struct file_probe *p, struct ps5_ftp *ftp, const char *server_path,
    while (at < total) {
       const size_t chunk = (size_t)(total - at < FILE_PROBE_CHUNK_MAX ? total - at : FILE_PROBE_CHUNK_MAX);
       file_fill(buffer, at, chunk);
-      if (ps5_ftp_send(data, buffer, chunk) != 0) {
+      bool sent = true;
+      for (size_t done = 0; sent && done < chunk; done += send_size) {
+         const size_t size = chunk - done < send_size ? chunk - done : send_size;
+         sent = ps5_ftp_send(data, (const char *)buffer + done, size) == 0;
+         /* A paced sender waits until its bytes so far fit the rate. */
+         const double due_ms = (double)(at - from + done + size) / 1048576.0 / pace_mibs * 1000.0;
+         while (pace_mibs > 0 && file_ms_since(&start) < due_ms)
+            usleep(1000);
+      }
+      if (!sent) {
          file_say(p, "offload %s: send at %llu failed errno=%d", how, (unsigned long long)at, errno);
          break;
       }
@@ -537,17 +546,31 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    }
    const uint64_t half = (uint64_t)mib * 1024u * 1024u / 2;
 
-   /* The server's own file: it creates it, and the caller opens it after. */
-   unlink(path);
-   const uint64_t fresh = offload_send(&p, &ftp, server_path, buffer, 0, half, seconds / 2, "server's file");
-   bool fresh_ok = sink;
-   if (!sink) {
-      const int fd = open(path, O_RDONLY);
-      fresh_ok = fresh && fd >= 0 && offload_check(fd, fresh);
-      if (fd >= 0)
-         close(fd);
+   /* The server's own file: it creates it, and the caller opens it after;
+    * sent in 16 MiB pieces as fast as the route takes them, in 64 KiB pieces,
+    * and at 20 MiB/s (about what the network brings it). */
+   static const struct {
+      size_t send_size;
+      double pace_mibs;
+      const char *how;
+   } ways[3] = {{FILE_PROBE_CHUNK_MAX, 0, "server's file"},
+                {64u * 1024u, 0, "server's file, 64 KiB sends"},
+                {1024u * 1024u, 20, "server's file, 20 MiB/s"}};
+   uint64_t fresh = 0;
+   bool fresh_ok = true;
+   for (int way = 0; way < 3; ++way) {
       unlink(path);
-      file_say(&p, "offload server's file: the caller reads it back=%d", fresh_ok);
+      fresh = offload_send(&p, &ftp, server_path, buffer, 0, half, seconds / 4, ways[way].send_size,
+                           ways[way].pace_mibs, ways[way].how);
+      if (!sink) {
+         const int fd = open(path, O_RDONLY);
+         const bool ok = fresh && fd >= 0 && offload_check(fd, fresh);
+         if (fd >= 0)
+            close(fd);
+         unlink(path);
+         file_say(&p, "offload %s: the caller reads it back=%d", ways[way].how, ok);
+         fresh_ok &= ok;
+      }
    }
 
    /* The caller's own file: created, opened and its first 16 MiB written
@@ -560,8 +583,8 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    if (!sink && (fd < 0 || write(fd, buffer, first) != (ssize_t)first || fstat(fd, &before) != 0))
       file_say(&p, "offload caller's file: the local file failed errno=%d", errno);
    else if (!sink) {
-      const uint64_t end = offload_send(&p, &ftp, server_path, buffer, first, first + half, seconds / 2,
-                                        "caller's file");
+      const uint64_t end = offload_send(&p, &ftp, server_path, buffer, first, first + half, seconds / 4,
+                                        FILE_PROBE_CHUNK_MAX, 0, "caller's file");
       struct stat after;
       own_ok = end && fstat(fd, &after) == 0 && after.st_ino == before.st_ino && offload_check(fd, end);
       file_say(&p, "offload caller's file: the same file, whole=%d", own_ok);
