@@ -1006,6 +1006,110 @@ test_probe_write_routes(void)
    check(rmdir(first) == 0 && rmdir(second) == 0, "routes: the probe leaves its directories empty");
 }
 
+/* A fake FTP server for the offload probe: one client, anonymous, APPE only. */
+struct fake_ftp {
+   int listener;
+   unsigned port;
+   int appended;
+};
+
+static int
+fake_ftp_listen(unsigned *port)
+{
+   const int fd = socket(AF_INET, SOCK_STREAM, 0);
+   struct sockaddr_in address = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+   socklen_t length = sizeof(address);
+   if (fd < 0 || bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(fd, 1) != 0 ||
+       getsockname(fd, (struct sockaddr *)&address, &length) != 0)
+      return -1;
+   *port = ntohs(address.sin_port);
+   return fd;
+}
+
+static void
+fake_ftp_say(int fd, const char *line)
+{
+   if (write(fd, line, strlen(line)) < 0)
+      return;
+}
+
+static void *
+fake_ftp_serve(void *argument)
+{
+   struct fake_ftp *server = argument;
+   const int control = accept(server->listener, NULL, NULL);
+   if (control < 0)
+      return NULL;
+   fake_ftp_say(control, "220-fake server\r\n220 ready\r\n");
+   int data_listener = -1;
+   char line[600];
+   size_t used = 0;
+   char c;
+   while (read(control, &c, 1) == 1) {
+      if (c != '\n') {
+         if (c != '\r' && used + 1 < sizeof(line))
+            line[used++] = c;
+         continue;
+      }
+      line[used] = '\0';
+      used = 0;
+      if (!strncmp(line, "USER", 4))
+         fake_ftp_say(control, "331 password\r\n");
+      else if (!strncmp(line, "PASS", 4))
+         fake_ftp_say(control, "230 in\r\n");
+      else if (!strncmp(line, "TYPE", 4))
+         fake_ftp_say(control, "200 binary\r\n");
+      else if (!strncmp(line, "PASV", 4)) {
+         unsigned port = 0;
+         data_listener = fake_ftp_listen(&port);
+         char reply[80];
+         snprintf(reply, sizeof(reply), "227 Entering Passive Mode (127,0,0,1,%u,%u)\r\n", port / 256, port % 256);
+         fake_ftp_say(control, reply);
+      } else if (!strncmp(line, "APPE ", 5) && data_listener >= 0) {
+         fake_ftp_say(control, "150 sending\r\n");
+         const int data = accept(data_listener, NULL, NULL);
+         const int file = open(line + 5, O_WRONLY | O_CREAT | O_APPEND, 0666);
+         static char block[1 << 16];
+         ssize_t got;
+         while (data >= 0 && file >= 0 && (got = read(data, block, sizeof(block))) > 0)
+            if (write(file, block, (size_t)got) != got)
+               break;
+         close(file);
+         close(data);
+         close(data_listener);
+         data_listener = -1;
+         server->appended++;
+         fake_ftp_say(control, "226 done\r\n");
+      } else if (!strncmp(line, "QUIT", 4)) {
+         fake_ftp_say(control, "221 bye\r\n");
+         break;
+      } else
+         fake_ftp_say(control, "502 no\r\n");
+   }
+   close(control);
+   return NULL;
+}
+
+static void
+test_probe_ftp_offload(void)
+{
+   char directory[] = "/tmp/ps5-platform-offload-XXXXXX";
+   check(mkdtemp(directory) != NULL, "offload: a directory of its own");
+   struct fake_ftp server = {0};
+   server.listener = fake_ftp_listen(&server.port);
+   check(server.listener >= 0, "offload: a fake FTP server listens on the loopback");
+   pthread_t thread;
+   check(pthread_create(&thread, NULL, fake_ftp_serve, &server) == 0, "offload: the fake server runs");
+   struct probe_lines seen = {0};
+   check(ps5_platform_probe_ftp_offload(probe_line, &seen, directory, directory, server.port, 96, 60) == 0,
+         "offload: what the server appends is the caller's own file, whole and in order");
+   pthread_join(thread, NULL);
+   close(server.listener);
+   check(server.appended == 1, "offload: one APPE carries the whole file after its first chunk");
+   check(seen.lines >= 3, "offload: the probe reports statfs, its segments and its total");
+   check(rmdir(directory) == 0, "offload: the probe leaves its directory empty");
+}
+
 static void
 test_probe_threads(void)
 {
@@ -1605,6 +1709,7 @@ main(void)
    test_probe_files();
    test_probe_writes();
    test_probe_write_routes();
+   test_probe_ftp_offload();
    printf("%s\n", "test_probe_threads");
    fflush(stdout);
    test_probe_threads();

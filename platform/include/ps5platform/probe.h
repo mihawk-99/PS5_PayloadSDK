@@ -61,6 +61,18 @@ int ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *d
 int ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const char *const *directories,
                                     unsigned count, unsigned mib, unsigned seconds);
 
+/* The offload test (src/probe_files.c): a file of `directory` created and
+ * opened by the caller, its first 16 MiB written with write(), and the rest
+ * of `mib` MiB appended through the FTP server on 127.0.0.1:`port`
+ * (include/ps5platform/ftp.h) at `server_directory`, the same folder as the
+ * server names it (NULL: what statfs() says `directory` is mounted from),
+ * timed per 256 MiB and stopped after `seconds`; then the caller's descriptor
+ * must see the same file, its size and its bytes. Logs statfs()'s view of
+ * `directory` too. Returns how many checks failed. */
+int ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *directory,
+                                   const char *server_directory, unsigned port, unsigned mib,
+                                   unsigned seconds);
+
 /* The thread test (src/probe_threads.c): the stack size a fresh attribute
  * object reports, the calling thread's stack, and the stacks a thread created
  * with no attributes and one asking for 2 MiB run on, read back from inside
