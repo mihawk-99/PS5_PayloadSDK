@@ -666,6 +666,16 @@ test_libc_system(void)
    close(pipe_ends[1]);
    errno = 0;
    check(ps5_syscall(SYS_getpid) == -1 && errno == ENOSYS, "syscall: anything else is ENOSYS");
+   struct stat own;
+   check(stat(".", &own) == 0, "statfs: a path to ask about");
+   char volume[512];
+   check(ps5_statfs(".", volume) == 0 && ps5_statfs("/no/such/path", volume) == -1 && errno == ENOENT,
+         "statfs: an existing path answers, a missing one is ENOENT");
+   check(ps5_umask(022) == 0 && ps5_umask(077) == 0, "umask: no mask, none kept");
+   errno = 0;
+   check(ps5_fork() == -1 && errno == ENOSYS && ps5_setsid() == -1 && errno == EPERM &&
+            ps5_wait4(-1, NULL, 0, NULL) == -1 && errno == ECHILD,
+         "fork, setsid, wait4: refused");
    struct passwd entry, *found = &entry;
    char passwd_buffer[256];
    check(ps5_getpwnam_r("root", &entry, passwd_buffer, sizeof(passwd_buffer), &found) == 0 && found == NULL,

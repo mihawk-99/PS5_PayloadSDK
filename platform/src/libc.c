@@ -20,6 +20,11 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
+#if defined(__linux__)
+#include <sys/vfs.h>
+#else
+#include <sys/mount.h>
+#endif
 #include <pwd.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -116,6 +121,94 @@ fill_statvfs(struct statvfs *result)
    result->f_bfree = (fsblkcnt_t)((UINT64_C(16) << 30) / 32768);
    result->f_bavail = result->f_bfree;
    result->f_namemax = 255;
+}
+
+#if !defined(__linux__)
+/* FreeBSD's struct statfs from the statvfs answer. */
+static void
+fill_statfs(struct statfs *result)
+{
+   struct statvfs volume;
+   fill_statvfs(&volume);
+   memset(result, 0, sizeof(*result));
+   result->f_version = STATFS_VERSION;
+   result->f_bsize = volume.f_bsize;
+   result->f_iosize = volume.f_bsize;
+   result->f_blocks = volume.f_blocks;
+   result->f_bfree = volume.f_bfree;
+   result->f_bavail = (int64_t)volume.f_bavail;
+   result->f_namemax = volume.f_namemax;
+   strcpy(result->f_fstypename, "ufs");
+   strcpy(result->f_mntonname, "/");
+}
+#endif
+
+int
+ps5_statfs(const char *path, void *result)
+{
+   struct stat status;
+   if (!path || !result) {
+      errno = EFAULT;
+      return -1;
+   }
+   if (stat(path, &status) != 0)
+      return -1;
+#if defined(__linux__)
+   return statfs(path, result);
+#else
+   fill_statfs(result);
+   return 0;
+#endif
+}
+
+int
+ps5_fstatfs(int fd, void *result)
+{
+   struct stat status;
+   if (!result) {
+      errno = EFAULT;
+      return -1;
+   }
+   if (fstat(fd, &status) != 0)
+      return -1;
+#if defined(__linux__)
+   return fstatfs(fd, result);
+#else
+   fill_statfs(result);
+   return 0;
+#endif
+}
+
+mode_t
+ps5_umask(mode_t mask)
+{
+   (void)mask;
+   return 0;
+}
+
+pid_t
+ps5_fork(void)
+{
+   errno = ENOSYS;
+   return -1;
+}
+
+pid_t
+ps5_setsid(void)
+{
+   errno = EPERM;
+   return -1;
+}
+
+pid_t
+ps5_wait4(pid_t pid, int *status, int options, void *usage)
+{
+   (void)pid;
+   (void)status;
+   (void)options;
+   (void)usage;
+   errno = ECHILD;
+   return -1;
 }
 
 int

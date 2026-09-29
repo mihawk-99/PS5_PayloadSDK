@@ -51,9 +51,14 @@
  * They carry a ps5_ prefix: a title that defined libc's own names would
  * export them, which the title converter refuses. Each consumer binds the
  * standard names to these its own way (the title's link wraps, its core
- * loader's import table). umask is not here: the kernel a title talks to has
- * none, and an emulated mask that nothing applies would only mislead; code
- * that needs a file's mode sets it after creating the file.
+ * loader's import table). The kernel a title talks to applies no file mode
+ * mask: ps5_umask says so (0) and keeps nothing, since an emulated mask that
+ * nothing applies would only mislead; code that needs a file's mode sets it
+ * after creating the file.
+ *
+ *   statfs, fstatfs, umask, fork, setsid, wait4
+ *                          only libkernel_sys exports them: the imports
+ *                          resolve to nothing
  */
 #ifndef PS5PLATFORM_LIBC_H
 #define PS5PLATFORM_LIBC_H
@@ -96,6 +101,19 @@ uint32_t ps5_arc4random_uniform(uint32_t bound);
  * room. */
 int ps5_statvfs(const char *path, struct statvfs *result);
 int ps5_fstatvfs(int fd, struct statvfs *result);
+/* The same answer in FreeBSD's struct statfs (<sys/mount.h>), with no device
+ * behind the volume (f_mntfromname empty). result is a struct statfs. */
+int ps5_statfs(const char *path, void *result);
+int ps5_fstatfs(int fd, void *result);
+
+/* No file mode mask is applied: always 0, and nothing is kept. */
+mode_t ps5_umask(mode_t mask);
+
+/* A title starts no process: fork fails with ENOSYS, setsid with EPERM, wait4
+ * with ECHILD. */
+pid_t ps5_fork(void);
+pid_t ps5_setsid(void);
+pid_t ps5_wait4(pid_t pid, int *status, int options, void *usage);
 
 /* The first occurrence of needle in haystack, ignoring the case of ASCII
  * letters (the locale is "C"), as FreeBSD's strcasestr. */
