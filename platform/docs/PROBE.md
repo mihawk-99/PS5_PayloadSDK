@@ -228,11 +228,38 @@ minutes after the RetroArch title's GTA IV install had been held to 0.7 MiB/s,
 `write()` ran at 231 MiB/s again for 1 GiB: the budget refills while the title
 does not write, at about the rate it allows.
 
-The console's FTP server, another process, took a 3 GiB upload to the same
-folder at 22-24 MiB/s, the network's rate, from start to end (2026-09-29): no
-drop after 1.3 GiB. Writing through another process is the way past the
-budget; `include/ps5platform/ftp.h` is a client of such a server on the
-loopback, and `ps5_platform_probe_ftp_offload` measures that route.
+Threads do not share it out: once the burst is spent, 1, 4 and 8 threads
+writing one file at once with `pwrite()` wrote 2.0, 1.9 and 2.2 MiB/s in all
+(2026-09-29). The budget is the process's.
+
+### Writing through another process
+
+The console's FTP server (ftpsrv, a payload: another process) took uploads to
+the title's folder at 22-24 MiB/s from start to end: 3 GiB, 8 GiB of zeros and
+3 GiB of random bytes, with no title running, while a title idled, and while
+GTA IV ran (2026-09-29). `include/ps5platform/ftp.h` is a client of such a
+server on the loopback; `ps5_platform_probe_ftp_offload` (the title's
+`offload` word) measures that route from the title:
+
+| From the title, through the loopback | Rate |
+|---|---|
+| to the server's null device (no storage) | 1164 MiB/s for 3 GiB |
+| one connection to a file, whatever its pieces (16 MiB, 64 KiB), pace (as fast as it goes, 60, 40, 20 or 10 MiB/s), `TCP_NODELAY`, folder (the title's or `/data`), or who created the file | 6.8-6.9 MiB/s |
+| 4 connections at once, a file each | 16.8 MiB/s in all |
+| 8 connections at once, a file each | 21.6 MiB/s in all |
+
+A network client wrote to the same server at 23 MiB/s while the title's
+connection ran at 5.7 MiB/s beside it. So the server's writes are held back too,
+per connection (about 7 MiB/s) and in all (about 22-25 MiB/s, which is also
+what its network uploads reached); the budget a title spends does not apply to
+them, and they do not spend it. What the title appends to a file it holds open
+lands in that same file (same inode, size and bytes). The loopback scan
+(`ps5_ftp_find_local`) found the server in about 6 s. `_fstatfs()` is refused
+to a title (`EPERM`), so it cannot learn what `/app0` is mounted from that way.
+
+So no process a title can use writes at the storage's own speed: a title has
+its burst of about 1.3 GiB at 242 MiB/s, then about 2 MiB/s, and several
+connections to the FTP server add up to about 22 MiB/s beside that.
 
 ## Threads
 
