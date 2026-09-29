@@ -61,14 +61,15 @@ int ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *d
 int ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const char *const *directories,
                                     unsigned count, unsigned mib, unsigned seconds);
 
-/* The offload test (src/probe_files.c): a file of `directory` created and
- * opened by the caller, its first 16 MiB written with write(), and the rest
- * of `mib` MiB appended through the FTP server on 127.0.0.1:`port` (0: the
- * first the loopback scan finds, include/ps5platform/ftp.h) at `server_directory`, the same folder as the
- * server names it (NULL: what statfs() says `directory` is mounted from),
- * timed per 256 MiB and stopped after `seconds`; then the caller's descriptor
- * must see the same file, its size and its bytes. Logs statfs()'s view of
- * `directory` too. Returns how many checks failed. */
+/* The offload test (src/probe_files.c): `mib` MiB appended through the FTP
+ * server on 127.0.0.1:`port` (0: the first the loopback scan finds,
+ * include/ps5platform/ftp.h) to a file of `directory`, named
+ * `server_directory` by the server (NULL: what _fstatfs() says `directory` is
+ * mounted from), half to a file the server creates and the caller reads back
+ * after, half appended to a file the caller has created and holds open (its
+ * first 16 MiB written with write()), which must stay the same file; each
+ * timed per 256 MiB and stopped after half of `seconds`. "/dev/null" as the
+ * server's folder measures the route alone. Returns how many checks failed. */
 int ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *directory,
                                    const char *server_directory, unsigned port, unsigned mib,
                                    unsigned seconds);

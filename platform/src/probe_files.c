@@ -417,6 +417,70 @@ ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *direc
    return p.failures;
 }
 
+/* Appends [at, total) of the probe's pattern to `server_path` through `ftp`,
+ * timed per 256 MiB and stopped after `seconds`. Returns the end reached, or 0
+ * when the server refused or did not confirm. */
+static uint64_t
+offload_send(struct file_probe *p, struct ps5_ftp *ftp, const char *server_path, uint64_t *buffer,
+             uint64_t at, uint64_t total, unsigned seconds, const char *how)
+{
+   const int data = ps5_ftp_append_begin(ftp, server_path);
+   if (data < 0) {
+      file_say(p, "offload %s: APPE %s refused (code %d: %s)", how, server_path, ftp->code, ftp->reply);
+      return 0;
+   }
+   struct timespec start, mark;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   mark = start;
+   const uint64_t segment = 256u * 1024u * 1024u, from = at;
+   while (at < total) {
+      const size_t chunk = (size_t)(total - at < FILE_PROBE_CHUNK_MAX ? total - at : FILE_PROBE_CHUNK_MAX);
+      file_fill(buffer, at, chunk);
+      if (ps5_ftp_send(data, buffer, chunk) != 0) {
+         file_say(p, "offload %s: send at %llu failed errno=%d", how, (unsigned long long)at, errno);
+         break;
+      }
+      at += chunk;
+      if (at % segment == 0 || at == total) {
+         const double ms = file_ms_since(&mark);
+         const uint64_t bytes = at % segment ? at % segment : segment;
+         file_say(p, "offload %s: %llu MiB, this segment %.1f MiB/s", how, (unsigned long long)(at >> 20),
+                  (double)bytes / 1048576.0 / (ms / 1000.0));
+         clock_gettime(CLOCK_MONOTONIC, &mark);
+         if (file_ms_since(&start) > seconds * 1000.0) {
+            file_say(p, "offload %s: stopped after %u s", how, seconds);
+            break;
+         }
+      }
+   }
+   const double sent_ms = file_ms_since(&start);
+   const int confirmed = ps5_ftp_transfer_end(ftp, data);
+   const double confirmed_ms = file_ms_since(&start);
+   file_say(p, "offload %s: %llu MiB through the server, %.1f MiB/s sent, %.1f MiB/s confirmed (%s)", how,
+            (unsigned long long)((at - from) >> 20), (double)(at - from) / 1048576.0 / (sent_ms / 1000.0),
+            (double)(at - from) / 1048576.0 / (confirmed_ms / 1000.0), confirmed == 0 ? "226" : ftp->reply);
+   return confirmed == 0 ? at : 0;
+}
+
+/* The descriptor sees `size` bytes of the pattern: its size, and the bytes at
+ * the start, the middle and the end. */
+static bool
+offload_check(int fd, uint64_t size)
+{
+   struct stat status;
+   if (fstat(fd, &status) != 0 || (uint64_t)status.st_size != size || size < 4096)
+      return false;
+   const uint64_t probes[3] = {0, size / 2 & ~(uint64_t)4095, size - 4096};
+   for (int i = 0; i < 3; ++i) {
+      uint64_t expected[512], seen[512];
+      file_fill(expected, probes[i], sizeof(expected));
+      if (pread(fd, seen, sizeof(seen), (off_t)probes[i]) != (ssize_t)sizeof(seen) ||
+          memcmp(expected, seen, sizeof(seen)) != 0)
+         return false;
+   }
+   return true;
+}
+
 int
 ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *directory,
                                const char *server_directory, unsigned port, unsigned mib, unsigned seconds)
@@ -454,23 +518,6 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
       file_say(&p, "offload: directory name too long");
       return 1;
    }
-   uint64_t *const buffer =
-      mmap(NULL, FILE_PROBE_CHUNK_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-   if (buffer == MAP_FAILED)
-      return 1;
-   /* The file is the title's own first: created and opened here, with its
-    * first chunk written with write(); the server then appends the rest. */
-   const int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0666);
-   struct stat before;
-   const uint64_t first = FILE_PROBE_CHUNK_MAX, total = (uint64_t)mib * 1024u * 1024u;
-   file_fill(buffer, 0, first);
-   if (fd < 0 || write(fd, buffer, first) != (ssize_t)first || fstat(fd, &before) != 0) {
-      file_say(&p, "offload: the local file failed errno=%d", errno);
-      if (fd >= 0)
-         close(fd);
-      munmap(buffer, FILE_PROBE_CHUNK_MAX);
-      return 1;
-   }
    if (!port) {
       struct timespec scan;
       clock_gettime(CLOCK_MONOTONIC, &scan);
@@ -478,77 +525,52 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
       file_say(&p, "offload: the loopback scan %s an FTP server in %.0f ms", port ? "found" : "did not find",
                file_ms_since(&scan));
    }
+   uint64_t *const buffer =
+      mmap(NULL, FILE_PROBE_CHUNK_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+   if (buffer == MAP_FAILED)
+      return 1;
    struct ps5_ftp ftp;
    if (ps5_ftp_open(&ftp, port) != 0) {
       file_say(&p, "offload: no FTP server to log in to (code %d: %s)", ftp.code, ftp.reply);
-      close(fd);
-      unlink(path);
       munmap(buffer, FILE_PROBE_CHUNK_MAX);
       return 1;
    }
-   const int data = ps5_ftp_append_begin(&ftp, server_path);
-   if (data < 0) {
-      file_say(&p, "offload: APPE %s refused (code %d: %s)", server_path, ftp.code, ftp.reply);
-      ps5_ftp_close(&ftp);
-      close(fd);
-      unlink(path);
-      munmap(buffer, FILE_PROBE_CHUNK_MAX);
-      return 1;
-   }
-   struct timespec start, mark;
-   clock_gettime(CLOCK_MONOTONIC, &start);
-   mark = start;
-   const uint64_t segment = 256u * 1024u * 1024u;
-   uint64_t at = first;
-   bool ok = true;
-   while (at < total) {
-      const size_t chunk = (size_t)(total - at < FILE_PROBE_CHUNK_MAX ? total - at : FILE_PROBE_CHUNK_MAX);
-      file_fill(buffer, at, chunk);
-      if (ps5_ftp_send(data, buffer, chunk) != 0) {
-         file_say(&p, "offload: send at %llu failed errno=%d", (unsigned long long)at, errno);
-         ok = false;
-         break;
-      }
-      at += chunk;
-      if (at % segment == 0 || at == total) {
-         const double ms = file_ms_since(&mark);
-         const uint64_t bytes = at % segment ? at % segment : segment;
-         file_say(&p, "offload: %llu MiB, this segment %.1f MiB/s", (unsigned long long)(at >> 20),
-                  (double)bytes / 1048576.0 / (ms / 1000.0));
-         clock_gettime(CLOCK_MONOTONIC, &mark);
-         if (file_ms_since(&start) > seconds * 1000.0) {
-            file_say(&p, "offload: stopped after %u s", seconds);
-            break;
-         }
-      }
-   }
-   const double sent_ms = file_ms_since(&start);
-   const int confirmed = ps5_ftp_transfer_end(&ftp, data);
-   const double confirmed_ms = file_ms_since(&start);
-   ps5_ftp_close(&ftp);
-   /* The title's descriptor sees what the server wrote: the same file, its
-    * size, and the bytes at the start, the middle and the end. */
-   struct stat after;
-   const bool same =
-      sink || (fstat(fd, &after) == 0 && after.st_ino == before.st_ino && (uint64_t)after.st_size == at);
-   if (sink)
-      after.st_size = 0;
-   bool content = true;
-   const uint64_t probes[3] = {first - 4096, at / 2 & ~(uint64_t)4095, at - 4096};
-   for (int i = 0; i < 3 && same && !sink; ++i) {
-      uint64_t expected[512], seen[512];
-      file_fill(expected, probes[i], sizeof(expected));
-      content &= pread(fd, seen, sizeof(seen), (off_t)probes[i]) == (ssize_t)sizeof(seen) &&
-                 memcmp(expected, seen, sizeof(seen)) == 0;
-   }
-   file_say(&p,
-            "offload: %llu MiB through the server, %.1f MiB/s sent, %.1f MiB/s confirmed (%s); "
-            "same file=%d size=%lld content=%d",
-            (unsigned long long)(at >> 20), (double)at / 1048576.0 / (sent_ms / 1000.0),
-            (double)at / 1048576.0 / (confirmed_ms / 1000.0), confirmed == 0 ? "226" : ftp.reply, same,
-            (long long)after.st_size, content);
-   close(fd);
+   const uint64_t half = (uint64_t)mib * 1024u * 1024u / 2;
+
+   /* The server's own file: it creates it, and the caller opens it after. */
    unlink(path);
+   const uint64_t fresh = offload_send(&p, &ftp, server_path, buffer, 0, half, seconds / 2, "server's file");
+   bool fresh_ok = sink;
+   if (!sink) {
+      const int fd = open(path, O_RDONLY);
+      fresh_ok = fresh && fd >= 0 && offload_check(fd, fresh);
+      if (fd >= 0)
+         close(fd);
+      unlink(path);
+      file_say(&p, "offload server's file: the caller reads it back=%d", fresh_ok);
+   }
+
+   /* The caller's own file: created, opened and its first 16 MiB written
+    * here; the server appends the rest while the caller holds it open. */
+   bool own_ok = sink;
+   const int fd = sink ? -1 : open(path, O_RDWR | O_CREAT | O_TRUNC, 0666);
+   struct stat before;
+   const uint64_t first = FILE_PROBE_CHUNK_MAX;
+   file_fill(buffer, 0, first);
+   if (!sink && (fd < 0 || write(fd, buffer, first) != (ssize_t)first || fstat(fd, &before) != 0))
+      file_say(&p, "offload caller's file: the local file failed errno=%d", errno);
+   else if (!sink) {
+      const uint64_t end = offload_send(&p, &ftp, server_path, buffer, first, first + half, seconds / 2,
+                                        "caller's file");
+      struct stat after;
+      own_ok = end && fstat(fd, &after) == 0 && after.st_ino == before.st_ino && offload_check(fd, end);
+      file_say(&p, "offload caller's file: the same file, whole=%d", own_ok);
+   }
+   if (fd >= 0)
+      close(fd);
+   if (!sink)
+      unlink(path);
+   ps5_ftp_close(&ftp);
    munmap(buffer, FILE_PROBE_CHUNK_MAX);
-   return ok && confirmed == 0 && same && content ? 0 : 1;
+   return (fresh || sink ? 0 : 1) + (fresh_ok ? 0 : 1) + (own_ok ? 0 : 1);
 }
