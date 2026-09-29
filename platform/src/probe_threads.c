@@ -501,8 +501,10 @@ thread_kqueue(struct thread_probe *p)
 
 struct topology_pair {
    volatile unsigned turn;
+   volatile unsigned abandoned; /* the probe gave up on the pair */
    int cpu;
-   int pinned; /* the partner's pinning result */
+   int pinned;                  /* the partner's pinning result */
+   volatile int ran_on;         /* the CPU the partner found itself on */
 };
 
 static int
@@ -534,10 +536,14 @@ topology_partner(void *opaque)
 {
    struct topology_pair *const pair = opaque;
    pair->pinned = topology_pin(pair->cpu);
+   pair->ran_on = thread_current_cpu();
    for (unsigned round = 0; round < TOPOLOGY_ROUNDS; round++) {
       const unsigned mine = 2u * round + 1u;
-      while (__atomic_load_n(&pair->turn, __ATOMIC_ACQUIRE) != mine)
+      while (__atomic_load_n(&pair->turn, __ATOMIC_ACQUIRE) != mine) {
+         if (__atomic_load_n(&pair->abandoned, __ATOMIC_ACQUIRE))
+            return NULL;
          topology_pause();
+      }
       __atomic_store_n(&pair->turn, mine + 1u, __ATOMIC_RELEASE);
    }
    return NULL;
@@ -545,16 +551,20 @@ topology_partner(void *opaque)
 
 /* The mean round trip in nanoseconds between the calling thread, pinned to
  * cpu a, and a partner pinned to cpu b; negative when either could not be
- * pinned or the partner not created. */
+ * pinned (-1, -3), the partner was not created (-2), a round took over 100 ms
+ * (-4: one of them did not run where it was pinned), or either found itself on
+ * another CPU (-5). */
 static double
 topology_round_trip(int a, int b)
 {
    if (topology_pin(a) != 0)
       return -1.0;
+   const int self_on = thread_current_cpu();
    static struct topology_pair pair;
    memset(&pair, 0, sizeof(pair));
    pair.cpu = b;
    pair.pinned = -1;
+   pair.ran_on = -1;
    pthread_t partner;
    pthread_attr_t attributes;
    pthread_attr_init(&attributes);
@@ -564,19 +574,32 @@ topology_round_trip(int a, int b)
    if (created != 0)
       return -2.0;
    double start = 0.0;
-   for (unsigned round = 0; round < TOPOLOGY_ROUNDS; round++) {
+   bool timed_out = false;
+   for (unsigned round = 0; round < TOPOLOGY_ROUNDS && !timed_out; round++) {
       /* The first hundred rounds warm the line and wait out the partner's start. */
       if (round == 100u)
          start = thread_now_us();
       const unsigned mine = 2u * round;
       __atomic_store_n(&pair.turn, mine + 1u, __ATOMIC_RELEASE);
-      while (__atomic_load_n(&pair.turn, __ATOMIC_ACQUIRE) != mine + 2u)
+      const double round_start = thread_now_us();
+      unsigned spins = 0;
+      while (__atomic_load_n(&pair.turn, __ATOMIC_ACQUIRE) != mine + 2u) {
          topology_pause();
+         if ((++spins & 1023u) == 0 && thread_now_us() - round_start > 100000.0) {
+            timed_out = true;
+            break;
+         }
+      }
    }
    const double took = thread_now_us() - start;
+   __atomic_store_n(&pair.abandoned, 1u, __ATOMIC_RELEASE);
    pthread_join(partner, NULL);
    if (pair.pinned != 0)
       return -3.0;
+   if (timed_out)
+      return -4.0;
+   if (self_on != a || pair.ran_on != b)
+      return -5.0;
    return took * 1000.0 / (double)(TOPOLOGY_ROUNDS - 100u);
 }
 
