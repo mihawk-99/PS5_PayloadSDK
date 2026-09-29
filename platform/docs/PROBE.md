@@ -144,6 +144,18 @@ soon as its start routine returns, and from `ps5_pthread_exit`, before any key
 destructor, as glibc does; the probe's destructor then reads its thread's value
 (2026-09-28).
 
+**kqueue.** A thread waiting in `kevent` with no timeout wakes for an
+`EVFILT_USER` event another thread triggers with a change of its own
+(`flags` 0, `NOTE_TRIGGER`: 50 ms after the trigger, as planned), and for a
+5 ms `EVFILT_TIMER` in `NOTE_NSECONDS`. Re-submitting the user event with
+`EV_ADD` and `NOTE_TRIGGER` does not wake it (2 s timeout reached), where
+FreeBSD would trigger: RPCS3's audio timer cancelled its waits that way and its
+thread never stopped (2026-09-28).
+
+**Reservations with no address** are placed at the view area and on in 4 GiB
+steps up to 1 TiB. The view area's 32 steps alone ran out under RPCS3, whose
+LLVM compilers reserve 768 MiB each.
+
 ## The shared-memory JIT interface
 
 `sceKernelJitCreateSharedMemory` is exported (under libkernel_web's JIT

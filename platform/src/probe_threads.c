@@ -22,10 +22,12 @@
 #if !defined(__linux__)
 #include <pthread_np.h>
 #include <sys/cpuset.h>
+#include <sys/event.h>
 
 #include "ps5platform/kernel.h"
 #endif
 #include "ps5platform/libc.h"
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -405,6 +407,89 @@ thread_local_order(struct thread_probe *p)
               ok ? "PASS" : "FAIL", (unsigned long long)order_seen);
 }
 
+#if !defined(__linux__)
+/* kqueue as RPCS3's audio timer uses it (sys_rsxaudio.cpp): a thread waits
+ * with no timeout for a nanosecond timer or a user event another thread
+ * triggers to cancel the wait. */
+struct kqueue_wait {
+   int kq;
+   int result;
+   uintptr_t ident;
+   double waited_us;
+};
+
+static void *
+kqueue_waiter(void *opaque)
+{
+   struct kqueue_wait *const wait = opaque;
+   struct kevent event;
+   memset(&event, 0, sizeof(event));
+   const struct timespec timeout = {2, 0};
+   const double begin = thread_now_us();
+   wait->result = kevent(wait->kq, NULL, 0, &event, 1, &timeout);
+   wait->waited_us = thread_now_us() - begin;
+   wait->ident = event.ident;
+   return NULL;
+}
+
+static void
+thread_kqueue(struct thread_probe *p)
+{
+   struct kqueue_wait wait = {.kq = kqueue(), .result = -2, .ident = 99};
+   struct kevent change;
+   EV_SET(&change, 1, EVFILT_USER, EV_ADD | EV_ENABLE | EV_CLEAR, NOTE_FFNOP, 0, NULL);
+   const int added = wait.kq >= 0 ? kevent(wait.kq, &change, 1, NULL, 0, NULL) : -1;
+   pthread_t thread;
+   const int created = pthread_create(&thread, NULL, kqueue_waiter, &wait);
+   struct timespec pause = {0, 50 * 1000 * 1000};
+   nanosleep(&pause, NULL);
+   EV_SET(&change, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+   const int triggered = kevent(wait.kq, &change, 1, NULL, 0, NULL);
+   const int trigger_errno = triggered < 0 ? errno : 0;
+   if (created == 0)
+      pthread_join(thread, NULL);
+   const bool user_ok = added == 0 && triggered == 0 && wait.result == 1 && wait.ident == 1 && wait.waited_us < 1000000;
+   thread_say(p, "kqueue user event added=%d triggered=%d (errno %d) waiter=%d ident=%lu waited_us=%.0f", added,
+              triggered, trigger_errno, wait.result, (unsigned long)wait.ident, wait.waited_us);
+
+   /* A 5 ms one-shot timer in nanoseconds. */
+   struct kqueue_wait timer = {.kq = wait.kq, .result = -2, .ident = 99};
+   EV_SET(&change, 0, EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT, NOTE_NSECONDS, 5 * 1000 * 1000, NULL);
+   const int armed = wait.kq >= 0 ? kevent(wait.kq, &change, 1, NULL, 0, NULL) : -1;
+   kqueue_waiter(&timer);
+   thread_say(p, "kqueue timer armed=%d waiter=%d ident=%lu waited_us=%.0f", armed, timer.result,
+              (unsigned long)timer.ident, timer.waited_us);
+   if (wait.kq >= 0)
+      close(wait.kq);
+
+   /* RPCS3's own form: the timer (armed for 10 s) and the user event kept as
+    * EV_SET left them, and one kevent call that disables the timer and
+    * re-submits the user event (EV_ADD, NOTE_FFNOP | NOTE_TRIGGER). */
+   struct kqueue_wait rpcs3 = {.kq = kqueue(), .result = -2, .ident = 99};
+   struct kevent handles[2];
+   EV_SET(&handles[0], 0, EVFILT_TIMER, EV_ADD | EV_ENABLE | EV_ONESHOT, NOTE_NSECONDS, 0, NULL);
+   EV_SET(&handles[1], 1, EVFILT_USER, EV_ADD | EV_ENABLE | EV_CLEAR, NOTE_FFNOP, 0, NULL);
+   const int user_added = kevent(rpcs3.kq, &handles[1], 1, NULL, 0, NULL);
+   handles[1].fflags |= NOTE_TRIGGER;
+   handles[0].data = 10LL * 1000 * 1000 * 1000;
+   const int timer_armed = kevent(rpcs3.kq, &handles[0], 1, NULL, 0, NULL);
+   const int rpcs3_created = pthread_create(&thread, NULL, kqueue_waiter, &rpcs3);
+   nanosleep(&pause, NULL);
+   handles[0].flags = (handles[0].flags & ~EV_ENABLE) | EV_DISABLE;
+   handles[0].data = 0;
+   const int cancelled = kevent(rpcs3.kq, handles, 2, NULL, 0, NULL);
+   const int cancel_errno = cancelled < 0 ? errno : 0;
+   if (rpcs3_created == 0)
+      pthread_join(thread, NULL);
+   close(rpcs3.kq);
+   thread_say(p, "kqueue rpcs3-form added=%d armed=%d cancelled=%d (errno %d) waiter=%d ident=%lu waited_us=%.0f",
+              user_added, timer_armed, cancelled, cancel_errno, rpcs3.result, (unsigned long)rpcs3.ident,
+              rpcs3.waited_us);
+   p->failures += user_ok ? 0 : 1;
+   thread_say(p, "check %s a kqueue user event triggered by another thread wakes a waiter", user_ok ? "PASS" : "FAIL");
+}
+#endif
+
 int
 ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
 {
@@ -446,6 +531,9 @@ ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
    thread_ping(&p, true);
    thread_scheduling(&p);
    thread_local_order(&p);
+#if !defined(__linux__)
+   thread_kqueue(&p);
+#endif
 
    thread_say(&p, "end failures=%d", p.failures);
    return p.failures;

@@ -7,9 +7,13 @@
 
 #include "ps5platform/kernel.h"
 
-/* Placed-anywhere candidates: the hint, then the view area in 4 GiB steps. */
+/* Placed-anywhere candidates: the hint, then the view area in 4 GiB steps, on
+ * up to 1 TiB, above which nothing is granted (docs/PROBE.md). The view area
+ * alone (32 steps) ran out under RPCS3, whose LLVM compilers each reserve
+ * 768 MiB. */
 #define PS5P_AREA_STEP ((uintptr_t)0x100000000ull)
-#define PS5P_AREA_CANDIDATES 32
+#define PS5P_AREA_END ((uintptr_t)0x10000000000ull)
+#define PS5P_AREA_CANDIDATES ((unsigned)((PS5P_AREA_END - PS5P_VIEW_AREA) / PS5P_AREA_STEP))
 /* Near-anchor candidates, on each side, in 64 MiB steps. */
 #define PS5P_NEAR_GRANULE ((uintptr_t)0x4000000ull)
 /* Nothing is placed in the first 16 MiB of the address space. */
