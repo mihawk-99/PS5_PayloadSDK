@@ -371,8 +371,12 @@ ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const char 
       }
       file_say(&p, "routes begin directory=%s mib=%u seconds=%u", directories[i], mib, seconds);
       unlink(path);
+      /* write() first, long enough to spend a title's burst; then the mapped
+       * route; then write() again, which shows whether the mapped route spent
+       * what write() is allowed. */
       p.failures += writes_pass(&p, path, buffer, mib, seconds, 0, false, "buffered") ? 0 : 1;
       p.failures += mapped_pass(&p, path, mib, seconds) ? 0 : 1;
+      p.failures += writes_pass(&p, path, buffer, mib, seconds / 3 ? seconds / 3 : 1, 0, false, "buffered") ? 0 : 1;
    }
    munmap(buffer, FILE_PROBE_CHUNK_MAX);
    file_say(&p, "routes end failures=%d", p.failures);
