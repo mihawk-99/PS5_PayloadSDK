@@ -294,6 +294,91 @@ writes_pass(struct file_probe *p, const char *path, uint64_t *buffer, unsigned m
    return ok;
 }
 
+/* One mapped pass: the file sized first, then written through MAP_SHARED
+ * windows of 64 MiB with no write() at all, each unmapped when full; fsync()
+ * after the last. The kernel writes the dirty pages back itself. */
+static bool
+mapped_pass(struct file_probe *p, const char *path, unsigned mib, unsigned seconds)
+{
+   const int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0666);
+   if (fd < 0) {
+      file_say(p, "routes mmap: open failed errno=%d", errno);
+      return false;
+   }
+   const uint64_t window = 64u * 1024u * 1024u, segment = 256u * 1024u * 1024u;
+   const uint64_t total = (uint64_t)mib * 1024u * 1024u;
+   if (ftruncate(fd, (off_t)total) != 0) {
+      file_say(p, "routes mmap: ftruncate to %u MiB failed errno=%d", mib, errno);
+      close(fd);
+      unlink(path);
+      return false;
+   }
+   struct timespec start, mark;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   mark = start;
+   uint64_t at = 0;
+   bool ok = true;
+   while (at < total) {
+      const size_t size = (size_t)(total - at < window ? total - at : window);
+      void *const view = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)at);
+      if (view == MAP_FAILED) {
+         file_say(p, "routes mmap: mmap at %llu failed errno=%d", (unsigned long long)at, errno);
+         ok = false;
+         break;
+      }
+      file_fill(view, at, size);
+      munmap(view, size);
+      at += size;
+      if (at % segment == 0 || at == total) {
+         const double ms = file_ms_since(&mark);
+         const uint64_t bytes = at % segment ? at % segment : segment;
+         file_say(p, "routes mmap: %llu MiB, this segment %.1f MiB/s", (unsigned long long)(at >> 20),
+                  (double)bytes / 1048576.0 / (ms / 1000.0));
+         clock_gettime(CLOCK_MONOTONIC, &mark);
+         if (file_ms_since(&start) > seconds * 1000.0) {
+            file_say(p, "routes mmap: stopped after %u s", seconds);
+            break;
+         }
+      }
+   }
+   const double written_ms = file_ms_since(&start);
+   fsync(fd);
+   const double synced_ms = file_ms_since(&start);
+   close(fd);
+   unlink(path);
+   file_say(p, "routes mmap: %llu MiB, %.1f MiB/s to the last unmap, %.1f MiB/s after fsync",
+            (unsigned long long)(at >> 20), (double)at / 1048576.0 / (written_ms / 1000.0),
+            (double)at / 1048576.0 / (synced_ms / 1000.0));
+   return ok;
+}
+
+int
+ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const char *const *directories,
+                                unsigned count, unsigned mib, unsigned seconds)
+{
+   struct file_probe p = {.log = log, .context = context};
+   void *const buffer = mmap(NULL, FILE_PROBE_CHUNK_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+   if (buffer == MAP_FAILED) {
+      file_say(&p, "no memory for a %u byte buffer, errno=%d", FILE_PROBE_CHUNK_MAX, errno);
+      return 1;
+   }
+   for (unsigned i = 0; i < count; ++i) {
+      char path[512];
+      if (snprintf(path, sizeof(path), "%s/%s", directories[i], FILE_PROBE_NAME) >= (int)sizeof(path)) {
+         file_say(&p, "directory name too long");
+         p.failures++;
+         continue;
+      }
+      file_say(&p, "routes begin directory=%s mib=%u seconds=%u", directories[i], mib, seconds);
+      unlink(path);
+      p.failures += writes_pass(&p, path, buffer, mib, seconds, 0, false, "buffered") ? 0 : 1;
+      p.failures += mapped_pass(&p, path, mib, seconds) ? 0 : 1;
+   }
+   munmap(buffer, FILE_PROBE_CHUNK_MAX);
+   file_say(&p, "routes end failures=%d", p.failures);
+   return p.failures;
+}
+
 int
 ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *directory, unsigned mib,
                           unsigned seconds)

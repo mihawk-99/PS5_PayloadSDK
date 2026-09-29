@@ -49,6 +49,17 @@ int ps5_platform_probe_files(ps5_probe_log_fn log, void *context, const char *di
 int ps5_platform_probe_writes(ps5_probe_log_fn log, void *context, const char *directory, unsigned mib,
                               unsigned seconds);
 
+/* The write route test (src/probe_files.c): in each of `directories`, `mib`
+ * MiB written in one file with write(), 16 MiB at a time, then through
+ * MAP_SHARED mappings of 64 MiB with no write() at all, each timed per 256 MiB
+ * and stopped after `seconds`, fsync() after the last. A title's write() runs
+ * at full speed for a burst and then at about 2 MiB/s while another process
+ * writes the same folder faster; this says whether the route or the path
+ * (a title's /app0 against the folder's own path) is what is held back.
+ * Returns how many checks failed (a write that fails). */
+int ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const char *const *directories,
+                                    unsigned count, unsigned mib, unsigned seconds);
+
 /* The thread test (src/probe_threads.c): the stack size a fresh attribute
  * object reports, the calling thread's stack, and the stacks a thread created
  * with no attributes and one asking for 2 MiB run on, read back from inside

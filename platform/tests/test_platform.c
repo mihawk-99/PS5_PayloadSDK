@@ -994,6 +994,19 @@ test_probe_writes(void)
 }
 
 static void
+test_probe_write_routes(void)
+{
+   char first[] = "/tmp/ps5-platform-routes-XXXXXX", second[] = "/tmp/ps5-platform-routes-XXXXXX";
+   check(mkdtemp(first) != NULL && mkdtemp(second) != NULL, "routes: two directories of their own");
+   const char *const directories[] = {first, second};
+   struct probe_lines seen = {0};
+   check(ps5_platform_probe_write_routes(probe_line, &seen, directories, 2, 64, 60) == 0,
+         "routes: write() and the mapped route write what they are asked in each directory");
+   check(seen.lines >= 10, "routes: each route reports its segments and its total");
+   check(rmdir(first) == 0 && rmdir(second) == 0, "routes: the probe leaves its directories empty");
+}
+
+static void
 test_probe_threads(void)
 {
    struct probe_lines seen = {0};
@@ -1591,6 +1604,7 @@ main(void)
    fflush(stdout);
    test_probe_files();
    test_probe_writes();
+   test_probe_write_routes();
    printf("%s\n", "test_probe_threads");
    fflush(stdout);
    test_probe_threads();
