@@ -547,17 +547,18 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    const uint64_t half = (uint64_t)mib * 1024u * 1024u / 2;
 
    /* The server's own file: it creates it, and the caller opens it after;
-    * sent in 16 MiB pieces as fast as the route takes them, then paced at
-    * 60 MiB/s in pieces of 64 KiB, 256 KiB and 1 MiB. The server writes what
-    * each recv() gives it: a paced sender keeps those writes to its pieces. */
+    * sent in 16 MiB pieces as fast as the route takes them, then in 64 KiB
+    * pieces paced at 10, 20 and 40 MiB/s. A sender faster than the server's
+    * writes fills its 1 MiB receive window, and then waits for the window to
+    * open again; a paced one may never fill it. */
    static const struct {
       size_t send_size;
       double pace_mibs;
       const char *how;
    } ways[4] = {{FILE_PROBE_CHUNK_MAX, 0, "server's file"},
-                {64u * 1024u, 60, "server's file, 64 KiB at 60 MiB/s"},
-                {256u * 1024u, 60, "server's file, 256 KiB at 60 MiB/s"},
-                {1024u * 1024u, 60, "server's file, 1 MiB at 60 MiB/s"}};
+                {64u * 1024u, 10, "server's file, 64 KiB at 10 MiB/s"},
+                {64u * 1024u, 20, "server's file, 64 KiB at 20 MiB/s"},
+                {64u * 1024u, 40, "server's file, 64 KiB at 40 MiB/s"}};
    uint64_t fresh = 0;
    bool fresh_ok = true;
    for (int way = 0; way < 4; ++way) {

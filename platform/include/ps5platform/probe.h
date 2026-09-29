@@ -66,8 +66,8 @@ int ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const c
  * include/ps5platform/ftp.h) to a file of `directory`, named
  * `server_directory` by the server (NULL: what _fstatfs() says `directory` is
  * mounted from), half to a file the server creates and the caller reads back
- * after (four times: sent in 16 MiB pieces as fast as it goes, and at 60 MiB/s
- * in pieces of 64 KiB, 256 KiB and 1 MiB), half appended to a file the caller
+ * after (four times: sent in 16 MiB pieces as fast as it goes, and in 64 KiB
+ * pieces at 10, 20 and 40 MiB/s), half appended to a file the caller
  * has created and holds open (its first 16 MiB written with write()), which
  * must stay the same file; each timed per 256 MiB and stopped after a fifth of
  * `seconds`. "/dev/null" as the
