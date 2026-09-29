@@ -1256,6 +1256,14 @@ test_probe_threads(void)
          "threads: both threads report their stacks, and a thread_local destructor reads its storage");
 }
 
+static void
+test_probe_topology(void)
+{
+   struct probe_lines seen = {0};
+   check(ps5_platform_probe_topology(probe_line, &seen) == 0, "topology: every pair of CPUs is pinned and measured");
+   check(seen.passes == 1, "topology: the probe reports its one check");
+}
+
 
 /* The POSIX gaps (src/posix.c) and regular expressions (src/regex.c). */
 static int
@@ -1851,6 +1859,7 @@ main(void)
    printf("%s\n", "test_probe_threads");
    fflush(stdout);
    test_probe_threads();
+   test_probe_topology();
    printf("%s\n", "test_exec_anywhere");
    fflush(stdout);
    test_exec_anywhere();

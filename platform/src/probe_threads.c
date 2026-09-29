@@ -490,6 +490,157 @@ thread_kqueue(struct thread_probe *p)
 }
 #endif
 
+/* ---- topology ------------------------------------------------------------ */
+
+/* How far apart the title's CPUs are: for each pair, two threads pinned one to
+ * each pass a cache line back and forth, and the mean round trip says whether
+ * they are one core's two threads, two cores sharing an L3, or two cores in
+ * different clusters. */
+#define TOPOLOGY_ROUNDS 20000u
+#define TOPOLOGY_CPUS 16
+
+struct topology_pair {
+   volatile unsigned turn;
+   int cpu;
+   int pinned; /* the partner's pinning result */
+};
+
+static int
+topology_pin(int cpu)
+{
+#if defined(__linux__)
+   cpu_set_t set;
+   CPU_ZERO(&set);
+   CPU_SET(cpu, &set);
+   return pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+#else
+   unsigned char set[32];
+   memset(set, 0, sizeof(set));
+   set[cpu / 8] = (unsigned char)(1u << (cpu % 8));
+   return ps5_pthread_setaffinity_np(pthread_self(), sizeof(set), set);
+#endif
+}
+
+static inline void
+topology_pause(void)
+{
+#if defined(__x86_64__)
+   __builtin_ia32_pause();
+#endif
+}
+
+static void *
+topology_partner(void *opaque)
+{
+   struct topology_pair *const pair = opaque;
+   pair->pinned = topology_pin(pair->cpu);
+   for (unsigned round = 0; round < TOPOLOGY_ROUNDS; round++) {
+      const unsigned mine = 2u * round + 1u;
+      while (__atomic_load_n(&pair->turn, __ATOMIC_ACQUIRE) != mine)
+         topology_pause();
+      __atomic_store_n(&pair->turn, mine + 1u, __ATOMIC_RELEASE);
+   }
+   return NULL;
+}
+
+/* The mean round trip in nanoseconds between the calling thread, pinned to
+ * cpu a, and a partner pinned to cpu b; negative when either could not be
+ * pinned or the partner not created. */
+static double
+topology_round_trip(int a, int b)
+{
+   if (topology_pin(a) != 0)
+      return -1.0;
+   static struct topology_pair pair;
+   memset(&pair, 0, sizeof(pair));
+   pair.cpu = b;
+   pair.pinned = -1;
+   pthread_t partner;
+   pthread_attr_t attributes;
+   pthread_attr_init(&attributes);
+   pthread_attr_setstacksize(&attributes, 256u * 1024u);
+   const int created = pthread_create(&partner, &attributes, topology_partner, &pair);
+   pthread_attr_destroy(&attributes);
+   if (created != 0)
+      return -2.0;
+   double start = 0.0;
+   for (unsigned round = 0; round < TOPOLOGY_ROUNDS; round++) {
+      /* The first hundred rounds warm the line and wait out the partner's start. */
+      if (round == 100u)
+         start = thread_now_us();
+      const unsigned mine = 2u * round;
+      __atomic_store_n(&pair.turn, mine + 1u, __ATOMIC_RELEASE);
+      while (__atomic_load_n(&pair.turn, __ATOMIC_ACQUIRE) != mine + 2u)
+         topology_pause();
+   }
+   const double took = thread_now_us() - start;
+   pthread_join(partner, NULL);
+   if (pair.pinned != 0)
+      return -3.0;
+   return took * 1000.0 / (double)(TOPOLOGY_ROUNDS - 100u);
+}
+
+int
+ps5_platform_probe_topology(ps5_probe_log_fn log, void *context)
+{
+   struct thread_probe p = {.log = log, .context = context};
+   thread_say(&p, "topology begin");
+
+   int affinity_result = -1;
+   const uint64_t affinity = thread_affinity(pthread_self(), &affinity_result);
+   int cpus[TOPOLOGY_CPUS];
+   int count = 0;
+   for (int cpu = 0; cpu < 64 && count < TOPOLOGY_CPUS; cpu++)
+      if (affinity & (1ull << cpu))
+         cpus[count++] = cpu;
+   thread_say(&p, "topology affinity=%#llx result=%d cpus=%d", (unsigned long long)affinity, affinity_result,
+              count);
+
+   /* One line a CPU: its round trips to every other, in nanoseconds. */
+   double worst = 0.0, best = 1e30;
+   int refused = 0;
+   for (int i = 0; i < count; i++) {
+      char line[400];
+      int used = snprintf(line, sizeof(line), "topology cpu %d:", cpus[i]);
+      for (int j = 0; j < count; j++) {
+         if (i == j) {
+            used += snprintf(line + used, sizeof(line) - (size_t)used, " -");
+            continue;
+         }
+         const double ns = topology_round_trip(cpus[i], cpus[j]);
+         refused += ns < 0.0;
+         if (ns > 0.0) {
+            worst = ns > worst ? ns : worst;
+            best = ns < best ? ns : best;
+         }
+         used += snprintf(line + used, sizeof(line) - (size_t)used, " %.0f", ns);
+      }
+      thread_say(&p, "%s", line);
+   }
+
+   /* The calling thread goes back to every CPU it had. */
+#if defined(__linux__)
+   cpu_set_t all;
+   CPU_ZERO(&all);
+   for (int i = 0; i < count; i++)
+      CPU_SET(cpus[i], &all);
+   pthread_setaffinity_np(pthread_self(), sizeof(all), &all);
+#else
+   unsigned char all[32];
+   memset(all, 0, sizeof(all));
+   for (int i = 0; i < count; i++)
+      all[cpus[i] / 8] |= (unsigned char)(1u << (cpus[i] % 8));
+   ps5_pthread_setaffinity_np(pthread_self(), sizeof(all), all);
+#endif
+
+   const bool ok = count >= 2 && refused == 0;
+   p.failures += ok ? 0 : 1;
+   thread_say(&p, "check %s every pair of the %d CPUs could be pinned and measured (%d refused), %.0f..%.0f ns",
+              ok ? "PASS" : "FAIL", count, refused, count >= 2 ? best : 0.0, worst);
+   thread_say(&p, "topology end failures=%d", p.failures);
+   return p.failures;
+}
+
 int
 ps5_platform_probe_threads(ps5_probe_log_fn log, void *context)
 {

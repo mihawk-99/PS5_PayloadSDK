@@ -82,6 +82,14 @@ int ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const ch
  * each. Returns how many checks failed. */
 int ps5_platform_probe_threads(ps5_probe_log_fn log, void *context);
 
+/* The CPU topology test (src/probe_threads.c): for every pair of the CPUs in
+ * the calling thread's affinity (sixteen at most), the mean round trip of a
+ * cache line between two threads pinned one to each, in nanoseconds, a line
+ * per CPU; one core's two threads, cores sharing an L3 and cores in different
+ * clusters read differently. The caller gets its CPUs back. Returns how many
+ * checks failed. */
+int ps5_platform_probe_topology(ps5_probe_log_fn log, void *context);
+
 #ifdef __cplusplus
 }
 #endif
