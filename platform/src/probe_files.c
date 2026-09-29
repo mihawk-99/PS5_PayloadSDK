@@ -35,6 +35,7 @@
 #include <sys/stat.h>
 #if defined(__FreeBSD__)
 #include <sys/mount.h>
+int _fstatfs(int fd, struct statfs *buf);
 #endif
 #include <time.h>
 #include <unistd.h>
@@ -423,9 +424,15 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
    struct file_probe p = {.log = log, .context = context};
 #if defined(__FreeBSD__)
    /* FreeBSD's statfs() names what a directory is mounted from (a title's
-    * /app0 is its folder, mounted into its sandbox). */
+    * /app0 is its folder, mounted into its sandbox). The console exports
+    * neither statfs() nor fstatfs(), only _fstatfs(). */
    struct statfs mounted;
-   if (statfs(directory, &mounted) == 0)
+   memset(&mounted, 0, sizeof(mounted));
+   const int opened = open(directory, O_RDONLY | O_DIRECTORY);
+   const int stated = opened >= 0 ? _fstatfs(opened, &mounted) : -1;
+   if (opened >= 0)
+      close(opened);
+   if (stated == 0)
       file_say(&p, "offload statfs %s: from=%s on=%s type=%s", directory, mounted.f_mntfromname,
                mounted.f_mntonname, mounted.f_fstypename);
    else
