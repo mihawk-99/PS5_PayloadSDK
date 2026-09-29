@@ -502,6 +502,7 @@ thread_kqueue(struct thread_probe *p)
 struct topology_pair {
    volatile unsigned turn;
    volatile unsigned abandoned; /* the probe gave up on the pair */
+   volatile unsigned ready;     /* the partner is pinned */
    int cpu;
    int pinned;                  /* the partner's pinning result */
    volatile int ran_on;         /* the CPU the partner found itself on */
@@ -537,6 +538,7 @@ topology_partner(void *opaque)
    struct topology_pair *const pair = opaque;
    pair->pinned = topology_pin(pair->cpu);
    pair->ran_on = thread_current_cpu();
+   __atomic_store_n(&pair->ready, 1u, __ATOMIC_RELEASE);
    for (unsigned round = 0; round < TOPOLOGY_ROUNDS; round++) {
       const unsigned mine = 2u * round + 1u;
       while (__atomic_load_n(&pair->turn, __ATOMIC_ACQUIRE) != mine) {
@@ -557,9 +559,6 @@ topology_partner(void *opaque)
 static double
 topology_round_trip(int a, int b)
 {
-   if (topology_pin(a) != 0)
-      return -1.0;
-   const int self_on = thread_current_cpu();
    static struct topology_pair pair;
    memset(&pair, 0, sizeof(pair));
    pair.cpu = b;
@@ -569,10 +568,21 @@ topology_round_trip(int a, int b)
    pthread_attr_t attributes;
    pthread_attr_init(&attributes);
    pthread_attr_setstacksize(&attributes, 256u * 1024u);
+   /* The partner starts with the caller's CPUs (a thread inherits its creator's
+    * affinity) and pins itself before the caller does: pinned first, the
+    * caller would spin on a CPU the partner needed to start. */
    const int created = pthread_create(&partner, &attributes, topology_partner, &pair);
    pthread_attr_destroy(&attributes);
    if (created != 0)
       return -2.0;
+   while (!__atomic_load_n(&pair.ready, __ATOMIC_ACQUIRE))
+      sched_yield();
+   if (topology_pin(a) != 0) {
+      __atomic_store_n(&pair.abandoned, 1u, __ATOMIC_RELEASE);
+      pthread_join(partner, NULL);
+      return -1.0;
+   }
+   const int self_on = thread_current_cpu();
    double start = 0.0;
    bool timed_out = false;
    for (unsigned round = 0; round < TOPOLOGY_ROUNDS && !timed_out; round++) {
