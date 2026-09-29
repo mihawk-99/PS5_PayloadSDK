@@ -587,7 +587,16 @@ ps5_platform_probe_topology(ps5_probe_log_fn log, void *context)
    thread_say(&p, "topology begin");
 
    int affinity_result = -1;
+#if defined(__linux__)
    const uint64_t affinity = thread_affinity(pthread_self(), &affinity_result);
+#else
+   /* The platform layer's call: libc's refuses a cpuset_t there (ERANGE). */
+   unsigned char set[32];
+   memset(set, 0, sizeof(set));
+   affinity_result = ps5_pthread_getaffinity_np(pthread_self(), sizeof(set), set);
+   uint64_t affinity = 0;
+   memcpy(&affinity, set, sizeof(affinity));
+#endif
    int cpus[TOPOLOGY_CPUS];
    int count = 0;
    for (int cpu = 0; cpu < 64 && count < TOPOLOGY_CPUS; cpu++)
