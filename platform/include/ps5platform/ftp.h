@@ -45,6 +45,12 @@ int ps5_ftp_send(int data, const void *bytes, size_t size);
  * Returns 0 when it did (the bytes are in the file), or -1. */
 int ps5_ftp_transfer_end(struct ps5_ftp *ftp, int data);
 
+/* The first port in [first, last] on 127.0.0.1 whose service greets with an
+ * FTP "220" within `greeting_ms`, or 0. A closed port refuses at once, so a
+ * whole range takes about a second; a service that says something else, or
+ * nothing, is left at once or after `greeting_ms`. */
+unsigned ps5_ftp_find_local(unsigned first, unsigned last, int greeting_ms);
+
 /* Logs out and closes the control connection. */
 void ps5_ftp_close(struct ps5_ftp *ftp);
 

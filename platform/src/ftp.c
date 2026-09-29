@@ -165,6 +165,33 @@ ps5_ftp_transfer_end(struct ps5_ftp *ftp, int data)
    return code == 226 || code == 250 ? 0 : -1;
 }
 
+unsigned
+ps5_ftp_find_local(unsigned first, unsigned last, int greeting_ms)
+{
+   for (unsigned port = first; port && port <= last && port <= 65535; ++port) {
+      const int fd = socket(AF_INET, SOCK_STREAM, 0);
+      if (fd < 0)
+         return 0;
+      struct sockaddr_in address;
+      memset(&address, 0, sizeof(address));
+      address.sin_family = AF_INET;
+      address.sin_port = htons((unsigned short)port);
+      address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
+         close(fd);
+         continue;
+      }
+      const struct timeval timeout = {.tv_sec = greeting_ms / 1000, .tv_usec = greeting_ms % 1000 * 1000};
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+      char greeting[4] = {0};
+      const ssize_t got = recv(fd, greeting, 3, MSG_WAITALL);
+      close(fd);
+      if (got == 3 && !memcmp(greeting, "220", 3))
+         return port;
+   }
+   return 0;
+}
+
 void
 ps5_ftp_close(struct ps5_ftp *ftp)
 {

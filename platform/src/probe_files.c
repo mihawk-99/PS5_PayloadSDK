@@ -461,9 +461,16 @@ ps5_platform_probe_ftp_offload(ps5_probe_log_fn log, void *context, const char *
       munmap(buffer, FILE_PROBE_CHUNK_MAX);
       return 1;
    }
+   if (!port) {
+      struct timespec scan;
+      clock_gettime(CLOCK_MONOTONIC, &scan);
+      port = ps5_ftp_find_local(1, 65535, 300);
+      file_say(&p, "offload: the loopback scan %s an FTP server in %.0f ms", port ? "found" : "did not find",
+               file_ms_since(&scan));
+   }
    struct ps5_ftp ftp;
    if (ps5_ftp_open(&ftp, port) != 0) {
-      file_say(&p, "offload: no FTP server on 127.0.0.1:%u (code %d: %s)", port, ftp.code, ftp.reply);
+      file_say(&p, "offload: no FTP server to log in to (code %d: %s)", ftp.code, ftp.reply);
       close(fd);
       unlink(path);
       munmap(buffer, FILE_PROBE_CHUNK_MAX);

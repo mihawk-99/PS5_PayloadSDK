@@ -63,8 +63,8 @@ int ps5_platform_probe_write_routes(ps5_probe_log_fn log, void *context, const c
 
 /* The offload test (src/probe_files.c): a file of `directory` created and
  * opened by the caller, its first 16 MiB written with write(), and the rest
- * of `mib` MiB appended through the FTP server on 127.0.0.1:`port`
- * (include/ps5platform/ftp.h) at `server_directory`, the same folder as the
+ * of `mib` MiB appended through the FTP server on 127.0.0.1:`port` (0: the
+ * first the loopback scan finds, include/ps5platform/ftp.h) at `server_directory`, the same folder as the
  * server names it (NULL: what statfs() says `directory` is mounted from),
  * timed per 256 MiB and stopped after `seconds`; then the caller's descriptor
  * must see the same file, its size and its bytes. Logs statfs()'s view of

@@ -15,6 +15,7 @@
 extern int host_empty_decimal_point;
 #include "ps5platform/exec.h"
 #include "ps5platform/fp.h"
+#include "ps5platform/ftp.h"
 #include "ps5platform/heap.h"
 #include "ps5platform/klog.h"
 #include "ps5platform/kernel.h"
@@ -1033,13 +1034,10 @@ fake_ftp_say(int fd, const char *line)
       return;
 }
 
-static void *
-fake_ftp_serve(void *argument)
+/* One client's session; true when it ended with QUIT. */
+static bool
+fake_ftp_session(struct fake_ftp *server, int control)
 {
-   struct fake_ftp *server = argument;
-   const int control = accept(server->listener, NULL, NULL);
-   if (control < 0)
-      return NULL;
    fake_ftp_say(control, "220-fake server\r\n220 ready\r\n");
    int data_listener = -1;
    char line[600];
@@ -1082,11 +1080,26 @@ fake_ftp_serve(void *argument)
          fake_ftp_say(control, "226 done\r\n");
       } else if (!strncmp(line, "QUIT", 4)) {
          fake_ftp_say(control, "221 bye\r\n");
-         break;
+         return true;
       } else
          fake_ftp_say(control, "502 no\r\n");
    }
-   close(control);
+   return false;
+}
+
+/* Serves client after client (a scan's greeting check is one) until a
+ * session ends with QUIT. */
+static void *
+fake_ftp_serve(void *argument)
+{
+   struct fake_ftp *server = argument;
+   for (bool quit = false; !quit;) {
+      const int control = accept(server->listener, NULL, NULL);
+      if (control < 0)
+         return NULL;
+      quit = fake_ftp_session(server, control);
+      close(control);
+   }
    return NULL;
 }
 
@@ -1101,6 +1114,8 @@ test_probe_ftp_offload(void)
    pthread_t thread;
    check(pthread_create(&thread, NULL, fake_ftp_serve, &server) == 0, "offload: the fake server runs");
    struct probe_lines seen = {0};
+   check(ps5_ftp_find_local(server.port > 5 ? server.port - 5 : 1, server.port + 5, 300) == server.port,
+         "offload: the loopback scan finds the server by its greeting");
    check(ps5_platform_probe_ftp_offload(probe_line, &seen, directory, directory, server.port, 96, 60) == 0,
          "offload: what the server appends is the caller's own file, whole and in order");
    pthread_join(thread, NULL);

@@ -207,6 +207,33 @@ HD's 6.3 GB package installed at 13 MB/s for its first 2.7 GB and at 2.2 MB/s
 after that, 31.5 minutes in all, with its writing thread in `write()` for
 almost every sample.
 
+### What the budget is held on
+
+`ps5_platform_probe_write_routes` (the title's `routes` word) writes in the
+title's folder with `write()` for 45 s, then through `MAP_SHARED` windows of
+64 MiB with no `write()` at all for 45 s, then with `write()` again for 15 s,
+3 GiB at most each, 256 MiB at a time (2026-09-29):
+
+| Pass | Per 256 MiB |
+|---|---|
+| `write()` | 242 MiB/s for the first 1280 MiB, then 29, 27, 12 and 4.8 MiB/s |
+| shared mapping | 1371 and 1357 MiB/s into the page cache, then 7.4, 70, 60 and 10 MiB/s; 1536 MiB in 45 s, and the `fsync()` after it brought the pass to 3.9 MiB/s |
+| `write()` again | 2.0 MiB/s |
+
+So the budget is on what reaches the storage, not on `write()`: pages written
+back from a mapping are held back the same way, and spend the same budget. A
+title's folder is only reachable as `/app0`: its own path
+(`/data/homebrew/<title>`) is not in the sandbox (`ENOENT`). Seven idle
+minutes after the RetroArch title's GTA IV install had been held to 0.7 MiB/s,
+`write()` ran at 231 MiB/s again for 1 GiB: the budget refills while the title
+does not write, at about the rate it allows.
+
+The console's FTP server, another process, took a 3 GiB upload to the same
+folder at 22-24 MiB/s, the network's rate, from start to end (2026-09-29): no
+drop after 1.3 GiB. Writing through another process is the way past the
+budget; `include/ps5platform/ftp.h` is a client of such a server on the
+loopback, and `ps5_platform_probe_ftp_offload` measures that route.
+
 ## Threads
 
 `ps5_platform_probe_threads` (src/probe_threads.c) reads back, with
