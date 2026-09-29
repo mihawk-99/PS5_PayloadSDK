@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,8 +137,12 @@ ps5_ftp_append_begin(struct ps5_ftp *ftp, const char *path)
       close(data);
       return -1;
    }
-   const int size = 4 << 20;
+   const int size = 4 << 20, on = 1;
    setsockopt(data, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
+   /* The server's writes to storage fill its receive window; with Nagle's
+    * algorithm the last small segment then waits for an ACK the server delays,
+    * and the transfer runs at the delayed-ACK timer's pace. */
+   setsockopt(data, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
    return data;
 }
 
