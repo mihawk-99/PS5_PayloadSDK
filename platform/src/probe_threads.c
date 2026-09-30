@@ -637,6 +637,102 @@ topology_round_trip(int a, int b)
    return pair.ns;
 }
 
+/* Which CPUs are one core's two threads: a thread pinned to cpu a runs a loop
+ * that keeps the core's multiplier busy (eight independent products an
+ * iteration), alone and then beside the same loop pinned to cpu b; the share
+ * it keeps is near 100% on another core and near half beside its SMT
+ * sibling, which the round trips above do not tell apart. */
+#define TOPOLOGY_LOAD_MS 30.0
+
+struct topology_load {
+   volatile unsigned stop;
+   volatile unsigned ready;
+   volatile unsigned done;
+   int cpu[2];
+   int pinned[2];
+   volatile int ran_on[2];
+   uint64_t iterations[2];
+};
+
+struct topology_load_side {
+   struct topology_load *load;
+   int side;
+   int sides; /* 1: alone, 2: beside the other */
+};
+
+static void *
+topology_load_body(void *opaque)
+{
+   const struct topology_load_side *const me = opaque;
+   struct topology_load *const load = me->load;
+   const int side = me->side;
+   load->pinned[side] = topology_pin(load->cpu[side]);
+   load->ran_on[side] = thread_current_cpu();
+   __atomic_fetch_add(&load->ready, 1u, __ATOMIC_ACQ_REL);
+   while (__atomic_load_n(&load->ready, __ATOMIC_ACQUIRE) < (unsigned)me->sides) {
+      if (__atomic_load_n(&load->stop, __ATOMIC_ACQUIRE))
+         goto out;
+      topology_pause();
+   }
+   uint64_t v[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+   uint64_t iterations = 0;
+   while (!__atomic_load_n(&load->stop, __ATOMIC_ACQUIRE)) {
+      for (unsigned k = 0; k < 256u; k++)
+         for (unsigned i = 0; i < 8u; i++)
+            v[i] = v[i] * 6364136223846793005ull + i;
+      iterations += 256u;
+   }
+   load->iterations[side] = iterations + ((v[0] ^ v[1] ^ v[2] ^ v[3] ^ v[4] ^ v[5] ^ v[6] ^ v[7]) == 42u);
+out:
+   __atomic_fetch_add(&load->done, 1u, __ATOMIC_ACQ_REL);
+   return NULL;
+}
+
+/* Iterations a thread on cpu a made in TOPOLOGY_LOAD_MS, alone (b < 0) or
+ * beside one on cpu b; negative as topology_round_trip's are. */
+static double
+topology_load_run(int a, int b)
+{
+   static struct topology_load load;
+   memset(&load, 0, sizeof(load));
+   const int sides = b < 0 ? 1 : 2;
+   load.cpu[0] = a;
+   load.cpu[1] = b;
+   static struct topology_load_side me[2];
+   pthread_t threads[2];
+   bool created[2] = {false, false};
+   for (int side = 0; side < sides; side++) {
+      me[side] = (struct topology_load_side){.load = &load, .side = side, .sides = sides};
+      pthread_attr_t attributes;
+      pthread_attr_init(&attributes);
+      pthread_attr_setstacksize(&attributes, 256u * 1024u);
+      created[side] = pthread_create(&threads[side], &attributes, topology_load_body, &me[side]) == 0;
+      pthread_attr_destroy(&attributes);
+   }
+   bool all = true;
+   for (int side = 0; side < sides; side++)
+      all = all && created[side];
+   if (all) {
+      const double give_up = thread_now_us() + 2e6;
+      while (__atomic_load_n(&load.ready, __ATOMIC_ACQUIRE) < (unsigned)sides && thread_now_us() < give_up)
+         usleep(100);
+      usleep((useconds_t)(TOPOLOGY_LOAD_MS * 1000.0));
+   }
+   __atomic_store_n(&load.stop, 1u, __ATOMIC_RELEASE);
+   for (int side = 0; side < sides; side++)
+      if (created[side])
+         pthread_join(threads[side], NULL);
+   if (!all)
+      return -2.0;
+   for (int side = 0; side < sides; side++) {
+      if (load.pinned[side] != 0)
+         return -3.0;
+      if (load.ran_on[side] != load.cpu[side])
+         return -5.0;
+   }
+   return (double)load.iterations[0];
+}
+
 int
 ps5_platform_probe_topology(ps5_probe_log_fn log, void *context)
 {
@@ -683,6 +779,32 @@ ps5_platform_probe_topology(ps5_probe_log_fn log, void *context)
       }
       thread_say(&p, "%s", line);
    }
+
+   /* One line a CPU: the share of its loop's speed it kept beside each other
+    * CPU's, in percent. */
+   int shared_refused = 0;
+   for (int i = 0; i < count; i++) {
+      char line[400];
+      int used = snprintf(line, sizeof(line), "topology shared cpu %d:", cpus[i]);
+      /* A core the loop wakes runs slower at first: a first run warms it, and
+       * the better of two after it is the loop's speed alone. */
+      topology_load_run(cpus[i], -1);
+      const double first = topology_load_run(cpus[i], -1);
+      const double second = topology_load_run(cpus[i], -1);
+      const double alone = first > second ? first : second;
+      for (int j = 0; j < count; j++) {
+         if (i == j) {
+            used += snprintf(line + used, sizeof(line) - (size_t)used, " -");
+            continue;
+         }
+         const double beside = alone > 0.0 ? topology_load_run(cpus[i], cpus[j]) : -2.0;
+         shared_refused += beside <= 0.0;
+         used += snprintf(line + used, sizeof(line) - (size_t)used, " %.0f",
+                          beside > 0.0 ? 100.0 * beside / alone : beside);
+      }
+      thread_say(&p, "%s", line);
+   }
+   refused += shared_refused;
 
    /* The calling thread goes back to every CPU it had. */
 #if defined(__linux__)

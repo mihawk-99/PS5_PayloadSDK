@@ -86,7 +86,9 @@ int ps5_platform_probe_threads(ps5_probe_log_fn log, void *context);
  * the calling thread's affinity (sixteen at most), the mean round trip of a
  * cache line between two threads pinned one to each, in nanoseconds, a line
  * per CPU; one core's two threads, cores sharing an L3 and cores in different
- * clusters read differently. The caller gets its CPUs back. Returns how many
+ * clusters read differently; then, a line per CPU, the share of a busy loop's
+ * speed it keeps beside the same loop on each other CPU, which is about half
+ * beside its SMT sibling. The caller gets its CPUs back. Returns how many
  * checks failed. */
 int ps5_platform_probe_topology(ps5_probe_log_fn log, void *context);
 
