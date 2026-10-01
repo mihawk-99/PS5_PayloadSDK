@@ -314,6 +314,14 @@ An empty decimal point is not what `strtod` reads, so the C-locale parsing
 translating anything; it had spliced the empty point in place of '.', and
 through libc++'s `num_get` every `istream >> float` read 0.1 as 1e8.
 
+Code that asks `localeconv()` for the point and builds the number for `strtod`
+itself loses every fraction: nlohmann::json (tinygltf's JSON parser) put nothing
+where the '.' was, and on 2026-10-01 the PS5 Vulkan Samples title (PPSA99130)
+read every glTF material colour of 0.62 as 0 and drew its scenes black.
+`ps5_localeconv` gives the C locale's conventions as POSIX states them, '.' the
+point, without calling the console's; PS5_Vulkan's link recipe binds
+`localeconv` to it when the SDK it links has it.
+
 A process starts with denormals flushed, where every other x86-64 system starts
 at 0x1f80. Code written for those systems breaks on it: the Vulkan CTS computes
 the intervals it accepts for double-precision builtins on the CPU, and with a

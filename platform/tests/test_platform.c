@@ -1526,6 +1526,10 @@ test_posix(void)
    check(ps5_strtod_l(number, &number_end, c_locale) == 32.5 && number_end == number + 6 &&
             ps5_strtof_l("0.100000001", NULL, c_locale) == 0.100000001f,
          "strtod_l and strtof_l parse with '.' where localeconv's decimal point is empty (the console's)");
+   const struct lconv *const c_conventions = ps5_localeconv();
+   check(strcmp(c_conventions->decimal_point, ".") == 0 && strcmp(c_conventions->thousands_sep, "") == 0 &&
+            strcmp(c_conventions->grouping, "") == 0 && c_conventions->frac_digits == CHAR_MAX,
+         "localeconv gives the C locale's conventions where the console's decimal point is empty");
    host_empty_decimal_point = 0;
    check(ps5_dladdr((const void *)test_posix, NULL) == 0, "dladdr reports nothing");
 

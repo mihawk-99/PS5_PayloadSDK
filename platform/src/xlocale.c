@@ -61,6 +61,46 @@ extern int __mb_cur_max;
 
 /* ------------------------------------------------------------- the C locale */
 
+/* localeconv as POSIX gives it in the C locale, the only locale a title has.
+ * The console's reports an empty decimal point (docs/PROBE.md), and code that
+ * builds a number for strtod from it puts nothing where the '.' was:
+ * nlohmann::json (tinygltf's parser) then read every glTF number's integer part
+ * only, 0.62 as 0. Consumers bind localeconv to this (PS5_Vulkan's
+ * tools/radv-link.sh), so it must not call localeconv itself. */
+struct lconv *
+ps5_localeconv(void)
+{
+   static char empty[] = "";
+   static char point[] = ".";
+   static struct lconv c_conventions = {
+      .decimal_point = point,
+      .thousands_sep = empty,
+      .grouping = empty,
+      .int_curr_symbol = empty,
+      .currency_symbol = empty,
+      .mon_decimal_point = empty,
+      .mon_thousands_sep = empty,
+      .mon_grouping = empty,
+      .positive_sign = empty,
+      .negative_sign = empty,
+      .int_frac_digits = CHAR_MAX,
+      .frac_digits = CHAR_MAX,
+      .p_cs_precedes = CHAR_MAX,
+      .p_sep_by_space = CHAR_MAX,
+      .n_cs_precedes = CHAR_MAX,
+      .n_sep_by_space = CHAR_MAX,
+      .p_sign_posn = CHAR_MAX,
+      .n_sign_posn = CHAR_MAX,
+      .int_p_cs_precedes = CHAR_MAX,
+      .int_n_cs_precedes = CHAR_MAX,
+      .int_p_sep_by_space = CHAR_MAX,
+      .int_n_sep_by_space = CHAR_MAX,
+      .int_p_sign_posn = CHAR_MAX,
+      .int_n_sign_posn = CHAR_MAX,
+   };
+   return &c_conventions;
+}
+
 struct lconv *
 ps5_localeconv_l(void *locale)
 {

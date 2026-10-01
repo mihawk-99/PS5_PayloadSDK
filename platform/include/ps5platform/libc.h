@@ -306,6 +306,12 @@ void ps5_freelocale(void *locale);
 double ps5_strtod_l(const char *s, char **end, void *locale);
 float ps5_strtof_l(const char *s, char **end, void *locale);
 
+/* localeconv in the C locale as POSIX gives it, '.' the decimal point: the
+ * console's reports an empty one, and code that builds numbers for strtod from
+ * it loses their fractions. It does not call localeconv, so a consumer can bind
+ * localeconv to it (--defsym=localeconv=ps5_localeconv). */
+struct lconv *ps5_localeconv(void);
+
 /* FreeBSD's xlocale family in the C locale (src/xlocale.c): each does what its
  * plain counterpart does. The locale arguments are locale_t's, the catalogues
  * nl_catd's. */
