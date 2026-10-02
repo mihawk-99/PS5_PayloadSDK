@@ -15,6 +15,8 @@ int ps5p_heap_unmap(void *address, size_t bytes);
 
 #define ONLY_MSPACES 1
 #define USE_LOCKS 1
+/* Block behind an arena owner instead of starving it at real-time priority. */
+#define USE_SPIN_LOCKS 0
 /* Each block records its mspace, so a free or realloc from any thread goes to
  * the arena the block came from (src/heap.c). */
 #define FOOTERS 1

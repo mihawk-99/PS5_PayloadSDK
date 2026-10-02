@@ -90,9 +90,14 @@ build/host/test_directory_records: src/directory.c tests/test_directory_records.
 	$(HOST_CC) $(HOST_CFLAGS) src/directory.c tests/test_directory_records.c \
 		-Wl,--wrap=open -Wl,--wrap=close -o $@
 
-test: build/host/test_platform build/host/test_directory_records
+build/host/test_memory: src/memory.c tests/test_memory.c $(HEADERS)
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) src/memory.c tests/test_memory.c -o $@
+
+test: build/host/test_platform build/host/test_directory_records build/host/test_memory
 	build/host/test_platform
 	build/host/test_directory_records
+	build/host/test_memory
 
 clean:
 	rm -rf build

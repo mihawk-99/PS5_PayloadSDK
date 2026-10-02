@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
+#include <time.h>
 
 /* src/dlmalloc/mspace.c */
 typedef void *mspace;
@@ -189,8 +190,12 @@ once(int *state, bool (*make)(void *), void *context)
    if (seen == 0 &&
        __atomic_compare_exchange_n(state, &seen, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
       __atomic_store_n(state, make(context) ? 2 : 3, __ATOMIC_RELEASE);
-   while ((seen = __atomic_load_n(state, __ATOMIC_ACQUIRE)) == 1)
-      ;
+   /* A real-time waiter must let a preempted initializer run. sched_yield
+    * need not schedule a lower-priority owner on the same CPU. */
+   while ((seen = __atomic_load_n(state, __ATOMIC_ACQUIRE)) == 1) {
+      const struct timespec pause = {0, 50000};
+      nanosleep(&pause, NULL);
+   }
    return seen == 2;
 }
 
