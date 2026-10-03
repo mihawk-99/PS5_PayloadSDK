@@ -7,6 +7,7 @@
 #define PS5PLATFORM_PLATFORM_H
 
 #include "ps5platform/context.h"
+#include "ps5platform/elevation.h"
 #include "ps5platform/exec.h"
 #include "ps5platform/fp.h"
 #include "ps5platform/heap.h"

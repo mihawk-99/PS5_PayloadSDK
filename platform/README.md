@@ -3,7 +3,8 @@
 This directory is the part of my fork of the payload SDK that the upstream SDK
 does not have: one place for what every PS5 homebrew project of mine needs from
 the console. It holds the kernel functions we call, declared once. It holds the
-libc functions the console lacks or refuses. It gives executable code a home in
+libc functions the console lacks or refuses. It lets a sandboxed title reach `/data` by asking the Lapy
+daemon (`ps5platform/elevation.h`, `docs/ELEVATION.md`). It gives executable code a home in
 direct memory, and it provides shared-memory objects with several views on
 direct memory, with virtual-range reservations. And it gives a title's
 allocations a heap in direct memory (`ps5platform/heap.h`), since libc's own
