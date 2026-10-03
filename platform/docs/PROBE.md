@@ -352,3 +352,40 @@ own FILE on a pipe, drained by a reader thread, and published through the
 `fflush` and `fclose` wraps. In the CTS title, linked with
 `--wrap=fclose --wrap=fflush`, all 42 dEQP-VK.pipeline.*.executable_properties
 cases pass, the recorded IR among them.
+
+## Open files
+
+A title can hold about 256 files open at once. Measured on 2026-10-03 in
+PS5_Proton's Wine process (a title, `/data` granted), with `getrlimit(RLIMIT_NOFILE)`
+reporting 13,952 and `setrlimit` raised to that maximum without error:
+
+| What was opened in a loop until it failed | Succeeded | Then |
+|---|---|---|
+| `open(path)` of a `/data` file, `/dev/null`, `/data/ps5proton`, `/mnt/sandbox` (a directory) | 249 each | `EMFILE` |
+| `sceKernelOpen("/dev/null")`, libkernel's own | 249 | `EMFILE` |
+| `open("/dev/null")`, each moved to a number above 300 with `fcntl(F_DUPFD)` and the original closed | 249 | `EMFILE` |
+| `dup(2)` | 12,540 | `EMFILE` |
+| `socket(AF_UNIX, SOCK_STREAM, 0)` | 12,540 | `EMFILE` |
+
+So the limit is on files opened by path, not on descriptor numbers (which are
+cut off near 12,555, below the rlimit), and it is the same for every kind of
+path. A program that holds more files than that at once fails with "too many
+open files": Wine holds one descriptor per Windows file handle in its server, and
+the Java Minecraft launches with a few hundred jars and region files open;
+only 213 handles could be created before `NtCreateFile` returned
+`STATUS_TOO_MANY_OPENED_FILES`. `sysctl kern.maxfilesperproc`, `kern.maxfiles` and
+`kern.openfiles` are refused ("is not approved" in the kernel log), so the limit
+cannot be read or raised.
+
+`ps5_fdv_*` (ps5platform/fdv.h, src/fdv.c) lifts it for the files a consumer
+hands to it. When a title nears the limit, the files idle longest are parked: the
+path, flags and offset are remembered and every descriptor number of the file is
+replaced with a socket (`dup2` over it), which holds the number and does not count
+against the limit; the next call that uses one of the numbers reopens the file, seeks
+back and puts it under all of its numbers again. A copy of the descriptor made by
+`dup` or passed over a socket joins the file it copies, because it shares the kernel's
+file description and its offset. Reopening checks that the path still names the same
+device and inode and fails with `EIO` when it does not. A file that carries a lock, is
+registered with a kqueue, is wrapped in a `FILE` or is unlinked is never parked. The
+host tests (tests/test_fdv.c) run the module against a model of this kernel, with
+threads reading as another parks, and over the host's real kernel.

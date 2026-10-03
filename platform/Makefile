@@ -94,10 +94,15 @@ build/host/test_memory: src/memory.c tests/test_memory.c $(HEADERS)
 	@mkdir -p build/host
 	$(HOST_CC) $(HOST_CFLAGS) src/memory.c tests/test_memory.c -o $@
 
-test: build/host/test_platform build/host/test_directory_records build/host/test_memory
+build/host/test_fdv: src/fdv.c tests/test_fdv.c $(HEADERS)
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) src/fdv.c tests/test_fdv.c -o $@
+
+test: build/host/test_platform build/host/test_directory_records build/host/test_memory build/host/test_fdv
 	build/host/test_platform
 	build/host/test_directory_records
 	build/host/test_memory
+	build/host/test_fdv
 
 clean:
 	rm -rf build
