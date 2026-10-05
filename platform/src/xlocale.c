@@ -285,8 +285,19 @@ ps5_wctob_l(wint_t c, void *locale)
 int
 ps5_iswctype_l(wint_t c, wctype_t class_mask, void *locale)
 {
+#if defined(__FreeBSD__)
+   /* The caller's mask is FreeBSD's (_CTYPE_S for a space: libc++'s
+    * ctype<wchar_t>::do_is asks so). The console's iswctype is Dinkumware's (it
+    * exports _Iswctype and _Getpwctytab) and reads its argument as an index into
+    * its class table, so passing the mask on faulted: PS5_RetroArch's
+    * EmulationStation died in std::locale("C"), in libSceLibcInternal, on c 0x20
+    * with mask 0x4000 (base PS5, 13.40). The rune type answers as FreeBSD's
+    * iswctype_l does. */
+   return (ps5____runetype_l((int)c, locale) & class_mask) != 0;
+#else
    (void)locale;
    return iswctype(c, class_mask);
+#endif
 }
 
 size_t
