@@ -19,6 +19,8 @@ enum {
 /* The nth next call of that kind fails; with nth -1, every call fails until
  * host_fail(HOST_CALL_NONE, 0). */
 void host_fail(int call, int nth);
+/* In payload mode the plain direct-memory allocation is refused (a payload has no budget of its own); the ForApp one still works. */
+void host_payload_mode(bool on);
 /* Direct-memory allocations outstanding. */
 long long host_direct_allocations(void);
 /* What sceKernelDebugOutText has written, as one string. */

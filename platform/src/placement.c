@@ -19,6 +19,24 @@
 /* Nothing is placed in the first 16 MiB of the address space. */
 #define PS5P_LOWEST ((uintptr_t)0x1000000ull)
 
+/* Weak: a consumer linked against a libkernel without it keeps the plain call alone. */
+int32_t sceKernelAllocateDirectMemoryForApp(int64_t search_start, int64_t search_end, size_t length,
+                                            size_t alignment, int memory_type, int64_t *physical_start)
+   __attribute__((weak));
+
+int
+ps5p_allocate_direct(size_t bytes, int64_t *start)
+{
+   const int32_t result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes, PS5P_DIRECT_UNIT,
+                                                        PS5_KERNEL_DIRECT_TYPE_CPU, start);
+   if (result == 0 || !sceKernelAllocateDirectMemoryForApp)
+      return result;
+   if (sceKernelAllocateDirectMemoryForApp(0, sceKernelGetDirectMemorySize(), bytes, PS5P_DIRECT_UNIT,
+                                           PS5_KERNEL_DIRECT_TYPE_CPU, start) == 0)
+      return 0;
+   return result;
+}
+
 static uintptr_t
 candidate(uintptr_t hint, unsigned attempt)
 {

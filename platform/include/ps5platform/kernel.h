@@ -43,6 +43,10 @@ extern "C" {
 /* Direct memory: physical allocations mapped at any number of addresses. */
 int32_t sceKernelAllocateDirectMemory(int64_t search_start, int64_t search_end, size_t length,
                                       size_t alignment, int memory_type, int64_t *physical_start);
+/* A payload has no direct memory budget of its own, so sceKernelAllocateDirectMemory is refused there; this takes the pages from the
+ * running application's pool instead. */
+int32_t sceKernelAllocateDirectMemoryForApp(int64_t search_start, int64_t search_end, size_t length,
+                                            size_t alignment, int memory_type, int64_t *physical_start);
 int32_t sceKernelReleaseDirectMemory(int64_t start, size_t length);
 int32_t sceKernelMapDirectMemory(void **address, size_t length, int protection, int flags,
                                  int64_t direct_start, size_t alignment);

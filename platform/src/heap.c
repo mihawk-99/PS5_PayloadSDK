@@ -107,8 +107,7 @@ heap_map_locked(size_t bytes)
       return (void *)-1;
 
    int64_t start = -1;
-   if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes, HEAP_UNIT,
-                                     PS5_KERNEL_DIRECT_TYPE_CPU, &start) != 0)
+   if (ps5p_allocate_direct(bytes, &start) != 0)
       return (void *)-1;
    void *const at = (void *)(range_base + offset);
    void *mapped = at;

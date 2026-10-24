@@ -91,8 +91,7 @@ stack_map(struct thread_stack *stack)
    if (ps5p_reserve_placed(bytes + STACK_GUARD, 0, PS5P_DIRECT_UNIT, -1, &base) != 0)
       return false;
    int64_t start = -1;
-   if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes, PS5P_DIRECT_UNIT,
-                                     PS5_KERNEL_DIRECT_TYPE_CPU, &start) != 0) {
+   if (ps5p_allocate_direct(bytes, &start) != 0) {
       sceKernelMunmap(base, bytes + STACK_GUARD);
       return false;
    }

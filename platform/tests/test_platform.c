@@ -1768,6 +1768,27 @@ test_heap(void)
    check(kept && ps5_heap_owns(kept), "heap: the next request is the heap's again");
    __wrap_free(kept);
 
+   /* A payload's plain allocation is refused; the heap takes ForApp pages instead and keeps serving, with no fallback to libc. */
+   ps5_heap_stats(&stats);
+   const unsigned long long fallbacks_before_payload = stats.libc_fallbacks;
+   host_payload_mode(true);
+   void *payload_block = __wrap_malloc((size_t)96 << 20);
+   host_payload_mode(false);
+   ps5_heap_stats(&stats);
+   check(payload_block && ps5_heap_owns(payload_block) && stats.libc_fallbacks == fallbacks_before_payload,
+         "heap: a payload's refused plain allocation is served through ForApp");
+   __wrap_free(payload_block);
+   /* Refused twice (neither call has memory) the request still falls back. */
+   host_payload_mode(true);
+   host_fail(HOST_CALL_ALLOCATE, -1);
+   void *both_refused = __wrap_malloc((size_t)96 << 20);
+   host_fail(HOST_CALL_NONE, 0);
+   host_payload_mode(false);
+   ps5_heap_stats(&stats);
+   check(both_refused && !ps5_heap_owns(both_refused) && stats.libc_fallbacks == fallbacks_before_payload + 1,
+         "heap: with ForApp refused as well, libc serves it");
+   __wrap_free(both_refused);
+
    /* getline grows a heap buffer with the heap. */
    char text[] = "first line\nsecond, longer line that has to grow the buffer past its start\n";
    FILE *stream = fmemopen(text, strlen(text), "r");

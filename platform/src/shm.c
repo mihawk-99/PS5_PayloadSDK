@@ -32,9 +32,7 @@ ps5_shm_create(size_t bytes, struct ps5_shm *shm)
       return PS5_SHM_BAD_REQUEST;
    const size_t rounded = ps5p_round_up(bytes, PS5P_DIRECT_UNIT);
    int64_t start = -1;
-   const int32_t result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), rounded,
-                                                        PS5P_DIRECT_UNIT, PS5_KERNEL_DIRECT_TYPE_CPU,
-                                                        &start);
+   const int32_t result = ps5p_allocate_direct(rounded, &start);
    if (result != 0)
       return result;
    /* Direct memory comes back with what it held before (docs/PROBE.md); a new
@@ -305,8 +303,7 @@ ps5_vrange_commit(void *address, size_t bytes, int protection)
          break;
       }
       int64_t start = -1;
-      result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), PS5P_DIRECT_UNIT,
-                                             PS5P_DIRECT_UNIT, PS5_KERNEL_DIRECT_TYPE_CPU, &start);
+      result = ps5p_allocate_direct(PS5P_DIRECT_UNIT, &start);
       if (result != 0)
          break;
       void *mapped = (void *)at;

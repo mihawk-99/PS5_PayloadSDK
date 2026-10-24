@@ -103,8 +103,7 @@ ps5_exec_alloc(const struct ps5_exec_request *request, struct ps5_exec_region *r
    if (exact && !ps5p_outside_gpu_window(request->address, bytes))
       return PS5_EXEC_NO_PLACE;
    int64_t start = -1;
-   int32_t result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes,
-                                                  PS5P_DIRECT_UNIT, PS5_KERNEL_DIRECT_TYPE_CPU, &start);
+   int32_t result = ps5p_allocate_direct(bytes, &start);
    if (result != 0)
       return result;
    void *base = NULL;

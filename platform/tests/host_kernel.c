@@ -94,11 +94,20 @@ sceKernelGetDirectMemorySize(void)
    return DIRECT_BYTES;
 }
 
-int32_t
-sceKernelAllocateDirectMemory(int64_t search_start, int64_t search_end, size_t length,
-                              size_t alignment, int memory_type, int64_t *physical_start)
+static bool payload_mode;
+
+void
+host_payload_mode(bool on)
 {
-   (void)memory_type;
+   pthread_mutex_lock(&lock);
+   payload_mode = on;
+   pthread_mutex_unlock(&lock);
+}
+
+static int32_t
+allocate_direct(int64_t search_start, int64_t search_end, size_t length, size_t alignment,
+                int64_t *physical_start)
+{
    if (failing(HOST_CALL_ALLOCATE))
       return FAILED;
    if (length == 0 || length % UNIT != 0 || alignment % UNIT != 0 || search_end <= search_start)
@@ -128,6 +137,28 @@ sceKernelAllocateDirectMemory(int64_t search_start, int64_t search_end, size_t l
    }
    pthread_mutex_unlock(&lock);
    return (int32_t)0x8002000c;
+}
+
+/* A payload has no direct memory budget of its own: the plain call is refused. */
+int32_t
+sceKernelAllocateDirectMemory(int64_t search_start, int64_t search_end, size_t length,
+                              size_t alignment, int memory_type, int64_t *physical_start)
+{
+   (void)memory_type;
+   pthread_mutex_lock(&lock);
+   const bool payload = payload_mode;
+   pthread_mutex_unlock(&lock);
+   if (payload)
+      return (int32_t)0x80020001;
+   return allocate_direct(search_start, search_end, length, alignment, physical_start);
+}
+
+int32_t
+sceKernelAllocateDirectMemoryForApp(int64_t search_start, int64_t search_end, size_t length,
+                                    size_t alignment, int memory_type, int64_t *physical_start)
+{
+   (void)memory_type;
+   return allocate_direct(search_start, search_end, length, alignment, physical_start);
 }
 
 int32_t
