@@ -44,7 +44,9 @@ size_t mspace_usable_size(const void *pointer);
 void mspace_free(mspace space, void *pointer);
 
 
-#define HEAP_MAX_SEGMENTS 1024
+/* Enough segments of the arenas' 2 MiB granularity (src/dlmalloc/mspace.c) to
+ * fill the whole range: 16 GiB / 2 MiB. */
+#define HEAP_MAX_SEGMENTS 8192
 #define HEAP_UNIT PS5P_DIRECT_UNIT
 #define HEAP_PROTECTION (PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE)
 

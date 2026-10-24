@@ -1693,6 +1693,8 @@ test_heap(void)
    check((uintptr_t)small % 32 == 0, "heap: blocks are 32-byte aligned");
    check(stats.segments == 1 && host_direct_allocations() == direct_before + 1,
          "heap: the first block maps one segment");
+   check(stats.mapped_bytes <= ((size_t)2 << 20),
+         "heap: an arena's first segment is its 2 MiB granularity, not more");
    strcpy(small, "title heap");
    char *grown = __wrap_realloc(small, 100000);
    check(grown && ps5_heap_owns(grown) && strcmp(grown, "title heap") == 0,

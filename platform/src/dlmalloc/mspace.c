@@ -33,9 +33,13 @@ int ps5p_heap_unmap(void *address, size_t bytes);
  * are 32: its compilers emit 32-byte-aligned AVX stores into plain new
  * objects. */
 #define MALLOC_ALIGNMENT ((size_t)32)
-/* Each arena maps this much at a time: small enough that arenas a title
- * barely uses hold little direct memory. */
-#define DEFAULT_GRANULARITY ((size_t)16 << 20)
+/* Each arena maps this much at a time. Direct memory is committed whole when it
+ * is mapped, unlike libc's heap, whose pages are taken as they are touched: a
+ * payload that shares the application's pool (a Wine helper's Vulkan driver,
+ * eight arenas) held 88 MiB of 16 MiB segments where libc's heap had held about
+ * a tenth of it. 2 MiB keeps an idle arena's share small; src/heap.c's segment
+ * table is sized for the larger count of segments this makes. */
+#define DEFAULT_GRANULARITY ((size_t)2 << 20)
 #define DEFAULT_MMAP_THRESHOLD ((size_t)32 << 20)
 #define MALLOC_FAILURE_ACTION errno = ENOMEM
 #define NO_MALLINFO 1
