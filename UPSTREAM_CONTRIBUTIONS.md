@@ -20,5 +20,8 @@ One entry per problem. Update an entry instead of adding a duplicate; recheck li
 - **Evidence:** `make test` in `platform/`: 320 of 320 checks (two new, a fake kernel in payload mode); `make` builds the console library
   with `-Werror`. Hardware: PS5 Pro, firmware 10.01, a Wine helper's GPU client; browser helper resident memory across the start-up
   jump 588-664 to 247-278 MiB, libc heap 400 to 6 MiB in use (consumer repository's docs/PLAN.md, runs `fin1-2026-10-24-01` and `fin2-2026-10-24-01`).
-- **Remaining:** the consuming repository pins an older SDK revision and carries a stop-gap import patch for the same call; update the
-  pin and remove the patch.
+- **Follow-up, same layer:** `9d04878` lowers the heap's granularity from 16 to 2 MiB (direct memory is committed whole when mapped); also
+  local to `platform/`, so the same disposition applies.
+- **Console proof of both commits (2026-10-24, PS5 Pro, firmware 10.01, consumer pinned to `9d04878`, its own import patch off):** Steam Big Picture
+  peak system RSS 945-964 MiB before, 642 MiB after, libc heap 6 MiB in use; Isaac 60 fps, peak 673 MiB (672 MiB on libc's heap, 754 MiB with
+  16 MiB segments).
