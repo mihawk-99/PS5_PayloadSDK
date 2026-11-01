@@ -40,7 +40,7 @@
 
 /* ---- the model ---- */
 
-#define MODEL_FDS 4096
+#define MODEL_FDS 12288
 #define MODEL_NODES 512
 #define NODE_BYTES 64
 
@@ -763,6 +763,35 @@ case_host_kernel(void)
 /* ---- the runner ---- */
 
 static void
+case_more_files_than_groups_were(void)
+{
+   /* A Windows program on the console held 8294 files and then failed: groups ran out at 8192, and a file
+    * past that was never tracked, so it could not be parked (a store client's download, 2026-10-31). */
+   enum { COUNT = 10000, FILES = 4 };
+   static int fds[COUNT];
+
+   start(24, FILES, 16, 4);
+   for (int i = 0; i < COUNT; i++) {
+      char path[64];
+      snprintf(path, sizeof(path), "/data/file-%03d", 1 + i % FILES);
+      fds[i] = ps5_fdv_open(path, O_RDONLY, 0);
+      CHECK(fds[i] >= 0);
+   }
+   CHECK(most_live_files <= 24);
+   for (int i = 0; i < COUNT; i += 97) {
+      char byte;
+      CHECK(model_read(fds[i], &byte, 1) == 1);
+      CHECK(byte == expect(1 + i % FILES, 0));
+   }
+   CHECK(misuse == 0);
+   struct ps5_fdv_stats stats;
+   ps5_fdv_get_stats(&stats);
+   CHECK(stats.failures == 0 && stats.live + stats.parked == COUNT);
+   for (int i = 0; i < COUNT; i++)
+      CHECK(ps5_fdv_close(fds[i]) == 0);
+}
+
+static void
 run(const char *name, void (*body)(void))
 {
    fflush(stdout);
@@ -793,6 +822,7 @@ main(void)
    run("descriptors received", case_descriptors_received);
    run("closed while parked", case_closed_while_parked);
    run("rewind while parked", case_rewind_while_parked);
+   run("more files than groups were", case_more_files_than_groups_were);
    run("threads", case_threads);
    run("host kernel", case_host_kernel);
    printf("fdv: all passed\n");

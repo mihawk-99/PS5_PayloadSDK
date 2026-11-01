@@ -33,7 +33,7 @@
 #include <sys/stat.h>
 
 #define MAX_FDS 16384
-#define MAX_GROUPS 8192
+#define MAX_GROUPS MAX_FDS /* a tracked file is a group: fewer would leave files past it unparkable */
 #define MAX_MEMBERS 6
 #define PATH_LIMIT 1024
 #define BATCH_LIMIT 64
