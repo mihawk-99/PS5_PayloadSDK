@@ -1,7 +1,7 @@
 # PS5_PayloadSDK
 
-My fork of [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk), based on
-its v0.42 release. It adds one thing the upstream SDK does not have: a **platform
+My fork of [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk), merged up to
+its master of 2026-11-06, after its v0.45 release. It adds one thing the upstream SDK does not have: a **platform
 layer** (`platform/`) that holds, in one place, what every one of my PS5
 homebrew projects needs from the console and cannot take from the SDK as
 released. [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) (the RADV
@@ -39,12 +39,11 @@ of the console's kernel.
 
 A project pins a revision of this fork. Its dependency setup exports that
 revision with `git archive` and runs `platform/tools/setup-sdk.sh` from the
-export: the script downloads the upstream v0.42 release, checks its digest,
+export: the script downloads the upstream v0.45 release, checks its digest,
 installs this revision's headers, compiler wrappers and platform layer over it,
 and records the revision in the SDK directory's `.ps5-sdk-revision`. The
 release's binaries (crt, libc, the stubs, libc++ and the host tools) are kept as
-released: they are the binaries every project was validated with on the
-console. More in [platform/README.md](platform/README.md).
+released. More in [platform/README.md](platform/README.md).
 
 Beside the platform layer, the fork changes the host compiler wrappers
 (`host/bin/`), which assume IEEE denormals, and corrects the machine context in

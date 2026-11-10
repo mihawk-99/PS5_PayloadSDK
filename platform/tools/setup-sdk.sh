@@ -16,9 +16,9 @@
 # <http://www.gnu.org/licenses/>.
 #
 # Installs this fork of the payload SDK into a project's SDK directory: the
-# upstream release this fork is based on, whose binaries (crt, libc, stubs,
-# libc++, tools) are the ones validated on the console, with this tree's
-# headers and platform layer installed over it.
+# upstream release this fork is merged up to, whose binaries (crt, libc, stubs,
+# libc++, tools) are kept as released, with this tree's headers and platform
+# layer installed over it.
 #
 #   platform/tools/setup-sdk.sh <sdk-dir> <revision> [download-cache]
 #
@@ -31,8 +31,8 @@
 # .ps5-sdk-revision, which consumers compare against their pin.
 set -euo pipefail
 
-release_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.42/ps5-payload-sdk.zip"
-release_hash="8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da"
+release_url="https://github.com/ps5-payload-dev/sdk/releases/download/v0.45/ps5-payload-sdk.zip"
+release_hash="5fac64093d0e3e69f2584ce7935f24f703f622d9681f1495c85b9f00d1291a2c"
 
 [[ $# == 2 || $# == 3 ]] || {
     echo "usage: ${0##*/} <sdk-dir> <revision> [download-cache]" >&2
@@ -94,4 +94,4 @@ else
     rm -rf -- "$sdk"
     mv -- "$staging/ps5-payload-sdk" "$sdk"
 fi
-echo "==> [sdk] $sdk: payload SDK v0.42 with the PS5 fork at $revision"
+echo "==> [sdk] $sdk: payload SDK v0.45 with the PS5 fork at $revision"

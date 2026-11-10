@@ -23,15 +23,19 @@ its headers in `target/include/ps5platform`, as part of the SDK's own install.
 PS5_RetroArch (and, through the title, its cores), PS5_Vulkan, PS5_vkQuake and
 the templates each pin one revision of this fork. Their dependency setup
 exports that revision with `git archive` and runs `platform/tools/setup-sdk.sh`
-from the export. The script downloads the upstream v0.42 release, the one this
-fork is based on, and checks it against its digest. It installs this revision's
+from the export. The script downloads the upstream v0.45 release, the latest this
+fork is merged past, and checks it against its digest. It installs this revision's
 headers and platform layer over the release, then records the revision in the
 SDK directory's `.ps5-sdk-revision`.
 
 The release's binaries (crt, libc, the stubs, libc++ and the host tools) are
-kept as released rather than rebuilt here. Those are the binaries every
-project has been validated with on the console. A rebuild with another
-compiler is not byte-identical, and the fork changes none of them.
+kept as released rather than rebuilt here: a rebuild with another compiler is
+not byte-identical, and the fork changes none of them. Every project was
+validated on the console with v0.42's binaries (upstream's build with clang
+18); v0.45's are upstream's build with clang 22 and add killpg(), the IOMMU
+helpers, the kernel offsets of firmware 14.00/14.10 and the libSceAgc and
+libSceAgcDriver stubs. A project that moves its pin across that change runs on
+the console again before it releases.
 
 - `include/ps5platform/`: the headers.
 - `src/`: the library, including the capability probe (`src/probe.c`).
