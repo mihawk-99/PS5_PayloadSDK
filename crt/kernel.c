@@ -16,6 +16,7 @@ along with this program; see the file COPYING. If not, see
 
 #include "elf.h"
 #include "kernel.h"
+#include "kernel_iommu.h"
 #include "nid.h"
 #include "syscall.h"
 
@@ -72,6 +73,8 @@ typedef union kernel_pipebuf {
  **/
 unsigned long KERNEL_ADDRESS_TEXT_BASE        = 0; // optional
 unsigned long KERNEL_ADDRESS_DATA_BASE        = 0; // provided by payload args
+unsigned long KERNEL_ADDRESS_DMAP_BASE        = 0; // derived by crt
+unsigned long KERNEL_ADDRESS_IOMMU_SOFTC      = 0; // derived by crt
 unsigned long KERNEL_ADDRESS_ALLPROC          = 0; // needed by crt
 unsigned long KERNEL_ADDRESS_ROOTVNODE        = 0; // needed by crt
 unsigned long KERNEL_ADDRESS_SECURITY_FLAGS   = 0; // needed by crt
@@ -87,7 +90,7 @@ const unsigned long KERNEL_OFFSET_PROC_P_PID     = 0xBC;
 const unsigned long KERNEL_OFFSET_PROC_P_VMSPACE = 0x200;
 
 unsigned long KERNEL_OFFSET_VMSPACE_P_ROOT  = 0; // needed by crt
-unsigned long KERNEL_OFFSET_VMSPACE_VM_PMAP = 0;
+unsigned long KERNEL_OFFSET_VMSPACE_VM_PMAP = 0; // needed by crt
 
 const unsigned long KERNEL_OFFSET_UCRED_CR_UID   = 0x04;
 const unsigned long KERNEL_OFFSET_UCRED_CR_RUID  = 0x08;
@@ -170,6 +173,79 @@ strlen(const char *str) {
   }
 
   return str - start;
+}
+
+
+static int
+kernel_is_heap_addr(unsigned long kaddr) {
+  unsigned int hi;
+
+  if(!kaddr || (kaddr & 7)) {
+    return 0;
+  }
+  if((kaddr >> 48) != 0xffff) {
+    return 0;
+  }
+
+  hi = (unsigned int)((kaddr >> 32) & 0xffff);
+  if(hi == 0 || hi == 0xffff) {
+    return 0;
+  }
+
+  return 1;
+}
+
+
+static unsigned long
+kernel_find_dmap_base(void) {
+  unsigned long vmspace;
+  unsigned long pml4u;
+  unsigned long proc;
+  unsigned long cr3;
+
+  if(!(proc=kernel_get_proc(0))) {
+    return 0;
+  }
+  if(kernel_copyout(proc + KERNEL_OFFSET_PROC_P_VMSPACE,
+		    &vmspace, sizeof(vmspace))) {
+    return 0;
+  }
+
+  if(kernel_copyout(vmspace + KERNEL_OFFSET_VMSPACE_VM_PMAP + 0x20,
+		    &pml4u, sizeof(pml4u))) {
+    return 0;
+  }
+  if(kernel_copyout(vmspace + KERNEL_OFFSET_VMSPACE_VM_PMAP + 0x28,
+		    &cr3, sizeof(cr3))) {
+    return 0;
+  }
+
+  return pml4u - cr3;
+}
+
+
+static unsigned long
+kernel_find_iommu_softc(void) {
+  unsigned long softc;
+  unsigned long kaddr;
+  unsigned long paddr;
+
+  for(kaddr=KERNEL_ADDRESS_ALLPROC; kaddr>=KERNEL_ADDRESS_DATA_BASE+8; kaddr-=8) {
+    if(kernel_copyout(kaddr, &softc, sizeof(softc))) {
+      return 0;
+    }
+    if(!kernel_is_heap_addr(softc)) {
+      continue;
+    }
+    if(kernel_copyout(softc+0x48, &paddr, sizeof(paddr))) {
+      continue;
+    }
+    if(paddr == 0xfdd80000UL) {
+      return softc;
+    }
+  }
+
+  return 0;
 }
 
 
@@ -487,6 +563,19 @@ __kernel_init(payload_args_t* args) {
     KERNEL_OFFSET_VMSPACE_P_ROOT    = 0x1d0;
     KERNEL_OFFSET_VMSPACE_VM_PMAP   = 0x2e8;
     break;
+
+  case 0x14000000:
+  case 0x14100000:
+  case 0x14200000:
+  case 0x14220000:
+    KERNEL_ADDRESS_TEXT_BASE        = KERNEL_ADDRESS_DATA_BASE - 0x0CE0000;
+    KERNEL_ADDRESS_ALLPROC          = KERNEL_ADDRESS_DATA_BASE + 0x28D9EA0;
+    KERNEL_ADDRESS_SECURITY_FLAGS   = KERNEL_ADDRESS_DATA_BASE + 0x0DA4064;
+    KERNEL_ADDRESS_ROOTVNODE        = KERNEL_ADDRESS_DATA_BASE + 0x315B510;
+    KERNEL_ADDRESS_BUS_DATA_DEVICES = KERNEL_ADDRESS_DATA_BASE + 0x20A8878;
+    KERNEL_OFFSET_VMSPACE_P_ROOT    = 0x1d0;
+    KERNEL_OFFSET_VMSPACE_VM_PMAP   = 0x2e8;
+    break;
 	  
   default:
     return -ENOSYS;
@@ -496,6 +585,13 @@ __kernel_init(payload_args_t* args) {
   KERNEL_ADDRESS_QA_FLAGS     = KERNEL_ADDRESS_SECURITY_FLAGS + 0x24;
   KERNEL_ADDRESS_UTOKEN_FLAGS = KERNEL_ADDRESS_SECURITY_FLAGS + 0x8C;
   KERNEL_ADDRESS_PRISON0      = kernel_get_ucred_prison(0);
+
+  if(!(KERNEL_ADDRESS_DMAP_BASE=kernel_find_dmap_base())) {
+    return -ENOSYS;
+  }
+  if(!(KERNEL_ADDRESS_IOMMU_SOFTC=kernel_find_iommu_softc())) {
+    return -ENOSYS;
+  }
 
   if(!KERNEL_DLSYM(0x1, __error)) {
     if(!KERNEL_DLSYM(0x2001, __error)) {
@@ -673,9 +769,7 @@ kernel_set_qaflags(const unsigned char qaflags[16]) {
   if(kernel_get_fw_version() < 0x7000000) {
     return kernel_copyin(qaflags, KERNEL_ADDRESS_QA_FLAGS, 16);
   } else {
-    // currently not supported
-    SET_ERRNO(ENOSYS);
-    return -1;
+    return kernel_iommu_copyin(qaflags, KERNEL_ADDRESS_QA_FLAGS, 16);
   }
 }
 
