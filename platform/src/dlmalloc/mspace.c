@@ -41,10 +41,30 @@ int ps5p_heap_unmap(void *address, size_t bytes);
  * table is sized for the larger count of segments this makes. */
 #define DEFAULT_GRANULARITY ((size_t)2 << 20)
 #define DEFAULT_MMAP_THRESHOLD ((size_t)32 << 20)
+/* An arena keeps this much free at its top before a free gives any back. At
+ * dlmalloc's 2 MiB a title that frees and allocates in bursts (a game area
+ * loading) unmapped and mapped the same direct memory over and over: 23 fps
+ * where it had 27. What stays free goes back at ps5_heap_trim. */
+#define DEFAULT_TRIM_THRESHOLD ((size_t)32 << 20)
 #define MALLOC_FAILURE_ACTION errno = ENOMEM
-#define NO_MALLINFO 1
+#define NO_MALLINFO 0
 #define NO_MALLOC_STATS 1
 /* Direct memory's unit, so every size dlmalloc maps and unmaps is one the
  * kernel allocates as asked. */
 #define malloc_getpagesize ((size_t)0x10000)
 #include "malloc.c"
+
+/* For src/heap.c's report and trim: what an arena holds in blocks it has
+ * handed out; and its free top and its segments with nothing in them given
+ * back. */
+size_t
+ps5p_mspace_in_use(mspace space)
+{
+   return (size_t)mspace_mallinfo(space).uordblks;
+}
+
+int
+ps5p_mspace_trim(mspace space)
+{
+   return mspace_trim(space, 0);
+}

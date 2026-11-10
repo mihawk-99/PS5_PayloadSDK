@@ -64,7 +64,17 @@ struct ps5_heap_stats {
    unsigned long long libc_fallbacks;
    /* The arenas made so far: one for each allocating thread, up to eight. */
    unsigned arenas;
+   /* What the arenas hold in blocks handed out; the rest of mapped_bytes is
+    * free inside their segments. */
+   size_t in_use_bytes;
 };
+
+/* Gives back each arena's free top and its segments with nothing in them. A
+ * free does that only past 32 MiB at an arena's top and every few thousand
+ * frees: a title calls this now and then (every 10 s, say) so that what a
+ * burst took goes back to the pool it shares with its GPU and its guest. */
+#define PS5_HEAP_TRIM 1
+void ps5_heap_trim(void);
 
 void ps5_heap_stats(struct ps5_heap_stats *stats);
 

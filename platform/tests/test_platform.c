@@ -1747,6 +1747,33 @@ test_heap(void)
          "heap: freeing it returns the segment's direct memory");
    check(stats.peak_bytes >= mapped + ((size_t)100 << 20), "heap: the peak remembers it");
 
+   /* What a burst leaves: after most of 150 MiB is freed, a trim gives back
+    * the segments nothing is left in, wherever they lie among the ones still
+    * held (they are never joined into one). */
+   enum { BURST = 256, BURST_BLOCK = 600000 };
+   static void *burst[BURST];
+   ps5_heap_stats(&stats);
+   const size_t before_burst = stats.mapped_bytes;
+   bool burst_made = true;
+   for (int i = 0; i < BURST; i++)
+      burst_made &= (burst[i] = __wrap_malloc(BURST_BLOCK)) != NULL;
+   ps5_heap_stats(&stats);
+   const size_t burst_mapped = stats.mapped_bytes;
+   check(burst_made && burst_mapped >= before_burst + ((size_t)140 << 20) &&
+            stats.in_use_bytes >= (size_t)BURST * BURST_BLOCK && stats.in_use_bytes <= stats.mapped_bytes,
+         "heap: a burst of blocks maps their segments, counted in use");
+   for (int i = 0; i < BURST; i++)
+      if (i % 32)
+         __wrap_free(burst[i]);
+   ps5_heap_trim();
+   ps5_heap_stats(&stats);
+   check(stats.mapped_bytes <= before_burst + ((size_t)40 << 20),
+         "heap: a trim gives back the segments a burst left empty, between the ones still held");
+   check(stats.in_use_bytes >= (size_t)(BURST / 32) * BURST_BLOCK && stats.in_use_bytes <= stats.mapped_bytes,
+         "heap: the blocks kept are still counted in use");
+   for (int i = 0; i < BURST; i += 32)
+      __wrap_free(burst[i]);
+
    /* libc's blocks stay libc's. */
    char *foreign = strdup("libc's own");
    check(foreign && !ps5_heap_owns(foreign), "heap: a libc block is not the heap's");

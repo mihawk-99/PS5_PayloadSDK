@@ -42,11 +42,20 @@ void *mspace_realloc(mspace space, void *pointer, size_t bytes);
 void *mspace_memalign(mspace space, size_t alignment, size_t bytes);
 size_t mspace_usable_size(const void *pointer);
 void mspace_free(mspace space, void *pointer);
+size_t ps5p_mspace_in_use(mspace space);
+int ps5p_mspace_trim(mspace space);
 
 
 /* Enough segments of the arenas' 2 MiB granularity (src/dlmalloc/mspace.c) to
  * fill the whole range: 16 GiB / 2 MiB. */
 #define HEAP_MAX_SEGMENTS 8192
+/* Left unmapped between two mappings, so that dlmalloc never joins them into
+ * one segment. It gives a segment back only whole, and one that grew by
+ * joining is held by any block left anywhere in it: after a title had compiled
+ * its shaders its heap stayed at 3.4 GiB mapped with 0.7 GiB in use, and the
+ * game beside it ran out of direct memory. Apart, the segments nothing is left
+ * in go back wherever they lie (2.2 GiB mapped in the same run). */
+#define HEAP_GAP HEAP_UNIT
 #define HEAP_UNIT PS5P_DIRECT_UNIT
 #define HEAP_PROTECTION (PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE)
 
@@ -101,9 +110,9 @@ heap_map_locked(size_t bytes)
    unsigned slot = 0;
    size_t offset = 0;
    for (; slot < segment_count; slot++) {
-      if (segments[slot].offset - offset >= bytes)
+      if (segments[slot].offset - offset >= bytes + HEAP_GAP)
          break;
-      offset = segments[slot].offset + segments[slot].bytes;
+      offset = segments[slot].offset + segments[slot].bytes + HEAP_GAP;
    }
    if (offset > range_bytes || range_bytes - offset < bytes)
       return (void *)-1;
@@ -274,6 +283,18 @@ ps5_heap_stats(struct ps5_heap_stats *stats)
    for (unsigned i = 0; i < HEAP_ARENAS; i++)
       stats->arenas += __atomic_load_n(&arena_states[i], __ATOMIC_ACQUIRE) == 2;
    stats->libc_fallbacks = __atomic_load_n(&libc_fallbacks, __ATOMIC_RELAXED);
+   stats->in_use_bytes = 0;
+   for (unsigned i = 0; i < HEAP_ARENAS; i++)
+      if (__atomic_load_n(&arena_states[i], __ATOMIC_ACQUIRE) == 2)
+         stats->in_use_bytes += ps5p_mspace_in_use(arenas[i]);
+}
+
+void
+ps5_heap_trim(void)
+{
+   for (unsigned i = 0; i < HEAP_ARENAS; i++)
+      if (__atomic_load_n(&arena_states[i], __ATOMIC_ACQUIRE) == 2)
+         ps5p_mspace_trim(arenas[i]);
 }
 
 void
