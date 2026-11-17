@@ -78,6 +78,15 @@ void ps5_heap_trim(void);
 
 void ps5_heap_stats(struct ps5_heap_stats *stats);
 
+/* A title's own look at what it allocates (a profile of its heap by caller):
+ * the wraps call allocated with every block they hand out and freed with every
+ * block they take back, libc's fallbacks included; a realloc is the old block
+ * freed and the new one allocated. The functions must not allocate. NULLs end
+ * it. */
+typedef void (*ps5_heap_allocated_fn)(void *pointer, size_t bytes);
+typedef void (*ps5_heap_freed_fn)(void *pointer);
+void ps5_heap_trace(ps5_heap_allocated_fn allocated, ps5_heap_freed_fn freed);
+
 /* The heap itself, for a title with an allocator of its own: NULL when direct
  * memory refuses, with no fallback. realloc, free and usable_size take the
  * heap's blocks only (ps5_heap_owns). */

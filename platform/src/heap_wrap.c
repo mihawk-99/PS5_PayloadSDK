@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -26,14 +27,42 @@ void __real_free(void *pointer);
 int __real_posix_memalign(void **out, size_t alignment, size_t bytes);
 __attribute__((weak)) size_t __real_malloc_usable_size(const void *pointer);
 
+/* ps5_heap_trace's functions: every block the wraps hand out and take back. */
+static _Atomic(ps5_heap_allocated_fn) trace_allocated;
+static _Atomic(ps5_heap_freed_fn) trace_freed;
+
+void
+ps5_heap_trace(ps5_heap_allocated_fn allocated, ps5_heap_freed_fn freed)
+{
+   atomic_store(&trace_freed, freed);
+   atomic_store(&trace_allocated, allocated);
+}
+
+static inline void *
+allocated(void *pointer, size_t bytes)
+{
+   const ps5_heap_allocated_fn trace = atomic_load_explicit(&trace_allocated, memory_order_relaxed);
+   if (trace && pointer)
+      trace(pointer, bytes);
+   return pointer;
+}
+
+static inline void
+freed(void *pointer)
+{
+   const ps5_heap_freed_fn trace = atomic_load_explicit(&trace_freed, memory_order_relaxed);
+   if (trace && pointer)
+      trace(pointer);
+}
+
 void *
 __wrap_malloc(size_t bytes)
 {
    void *const pointer = ps5_heap_malloc(bytes);
    if (pointer)
-      return pointer;
+      return allocated(pointer, bytes);
    ps5p_heap_count_fallback();
-   return __real_malloc(bytes);
+   return allocated(__real_malloc(bytes), bytes);
 }
 
 void *
@@ -41,9 +70,9 @@ __wrap_calloc(size_t count, size_t bytes)
 {
    void *const pointer = ps5_heap_calloc(count, bytes);
    if (pointer)
-      return pointer;
+      return allocated(pointer, count * bytes);
    ps5p_heap_count_fallback();
-   return __real_calloc(count, bytes);
+   return allocated(__real_calloc(count, bytes), count * bytes);
 }
 
 void
@@ -51,6 +80,7 @@ __wrap_free(void *pointer)
 {
    if (!pointer)
       return;
+   freed(pointer);
    if (ps5_heap_owns(pointer))
       ps5_heap_free(pointer);
    else
@@ -67,11 +97,25 @@ __wrap_malloc_usable_size(const void *pointer)
    return __real_malloc_usable_size ? __real_malloc_usable_size(pointer) : 0;
 }
 
+static void *heap_realloc(void *pointer, size_t bytes);
+
 void *
 __wrap_realloc(void *pointer, size_t bytes)
 {
    if (!pointer)
       return __wrap_malloc(bytes);
+   /* Traced as the old block freed and the new one allocated, in place or not; a failure keeps the old. */
+   void *const moved = heap_realloc(pointer, bytes);
+   if (moved) {
+      freed(pointer);
+      allocated(moved, bytes);
+   }
+   return moved;
+}
+
+static void *
+heap_realloc(void *pointer, size_t bytes)
+{
    /* FreeBSD's realloc gives a zero-size request a minimum-size object. */
    if (bytes == 0)
       bytes = 1;
@@ -128,11 +172,14 @@ __wrap_posix_memalign(void **out, size_t alignment, size_t bytes)
       return EINVAL;
    void *const pointer = ps5_heap_memalign(alignment, bytes);
    if (pointer) {
-      *out = pointer;
+      *out = allocated(pointer, bytes);
       return 0;
    }
    ps5p_heap_count_fallback();
-   return __real_posix_memalign(out, alignment, bytes);
+   const int result = __real_posix_memalign(out, alignment, bytes);
+   if (result == 0)
+      allocated(*out, bytes);
+   return result;
 }
 
 void *
