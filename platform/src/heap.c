@@ -34,6 +34,7 @@
 #include <time.h>
 
 /* src/dlmalloc/mspace.c */
+#include "dlmalloc/names.h"
 typedef void *mspace;
 mspace create_mspace(size_t capacity, int locked);
 void *mspace_malloc(mspace space, size_t bytes);

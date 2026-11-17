@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <stddef.h>
 
+#include "names.h"
+
 void *ps5p_heap_map(size_t bytes);
 int ps5p_heap_unmap(void *address, size_t bytes);
 
