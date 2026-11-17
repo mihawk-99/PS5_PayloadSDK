@@ -276,8 +276,9 @@ unit_release(struct unit *unit, bool keep_reserved)
    return result;
 }
 
-int
-ps5_vrange_commit(void *address, size_t bytes, int protection)
+/* contents: what the range's new units hold (from begin), or NULL for zeros. */
+static int
+vrange_commit(void *address, size_t bytes, int protection, const void *contents)
 {
    if (!address || bytes == 0)
       return PS5_SHM_BAD_REQUEST;
@@ -306,9 +307,22 @@ ps5_vrange_commit(void *address, size_t bytes, int protection)
       result = ps5p_allocate_direct(PS5P_DIRECT_UNIT, &start);
       if (result != 0)
          break;
+      /* Direct memory comes back with what it held before (docs/PROBE.md): it is filled through a
+       * view of its own first, so no thread sees the unit at its address before it holds zeros or
+       * the contents (a thread touching it until then faults, as on the reservation). */
+      void *fill = NULL;
+      result = ps5p_map_placed(start, PS5P_DIRECT_UNIT, 0, at_map, PS5_SHM_NO_PLACE, &fill);
+      if (result == 0) {
+         if (contents)
+            memcpy(fill, (const char *)contents + (at - begin), PS5P_DIRECT_UNIT);
+         else
+            memset(fill, 0, PS5P_DIRECT_UNIT);
+         sceKernelMunmap(fill, PS5P_DIRECT_UNIT);
+      }
       void *mapped = (void *)at;
-      result = sceKernelMapDirectMemory(&mapped, PS5P_DIRECT_UNIT, at_map, PS5_KERNEL_MAP_FIXED,
-                                        start, PS5P_PAGE);
+      if (result == 0)
+         result = sceKernelMapDirectMemory(&mapped, PS5P_DIRECT_UNIT, at_map, PS5_KERNEL_MAP_FIXED,
+                                           start, PS5P_PAGE);
       if (result == 0 && mapped != (void *)at) {
          sceKernelMunmap(mapped, PS5P_DIRECT_UNIT);
          result = PS5_SHM_NO_PLACE;
@@ -317,8 +331,6 @@ ps5_vrange_commit(void *address, size_t bytes, int protection)
          sceKernelReleaseDirectMemory(start, PS5P_DIRECT_UNIT);
          break;
       }
-      /* Direct memory comes back with what it held before (docs/PROBE.md). */
-      memset(mapped, 0, PS5P_DIRECT_UNIT);
       unit_insert(at, start, wanted);
       atomic_fetch_add(&committed_bytes, PS5P_DIRECT_UNIT);
       /* The unit's pages outside the range stay without access. */
@@ -331,6 +343,21 @@ ps5_vrange_commit(void *address, size_t bytes, int protection)
       result = sceKernelMprotect((void *)page_low, page_high - page_low, wanted);
    pthread_mutex_unlock(&units_lock);
    return result;
+}
+
+int
+ps5_vrange_commit(void *address, size_t bytes, int protection)
+{
+   return vrange_commit(address, bytes, protection, NULL);
+}
+
+int
+ps5_vrange_commit_copy(void *address, size_t bytes, int protection, const void *contents)
+{
+   const uintptr_t begin = (uintptr_t)address;
+   if (!contents || begin % PS5P_DIRECT_UNIT != 0 || bytes % PS5P_DIRECT_UNIT != 0)
+      return PS5_SHM_BAD_REQUEST;
+   return vrange_commit(address, bytes, protection, contents);
 }
 
 int

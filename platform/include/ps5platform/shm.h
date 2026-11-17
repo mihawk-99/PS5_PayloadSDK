@@ -70,6 +70,11 @@ int ps5_vrange_release(void *base, size_t bytes);
  * reserved again, with no access, and zero at their next commit. The part of a
  * unit only partly inside is zeroed, and kept. */
 int ps5_vrange_commit(void *address, size_t bytes, int protection);
+/* As ps5_vrange_commit, for whole units: the units it backs newly hold
+ * contents (bytes of it) before any thread can see them at their address, as
+ * an emulator that gives back cold memory needs to bring it back. Units
+ * already backed keep theirs. */
+int ps5_vrange_commit_copy(void *address, size_t bytes, int protection, const void *contents);
 int ps5_vrange_decommit(void *address, size_t bytes);
 
 struct ps5_shm_stats {
