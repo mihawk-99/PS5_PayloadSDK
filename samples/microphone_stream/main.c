@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifndef CAPTURE_SECONDS
+#define CAPTURE_SECONDS 30u
+#endif
+
 int sceUserServiceInitialize(void *param);
 int sceUserServiceTerminate(void);
 int sceUserServiceGetInitialUser(int *user_id);
@@ -18,6 +22,7 @@ main(void) {
   uint64_t window_frames = 0;
   uint64_t energy = 0;
   unsigned loops = 0;
+  unsigned elapsed = 0;
   int peak = 0;
   int rc;
 
@@ -45,8 +50,9 @@ main(void) {
 
   ps5_microphone_get_stats(mic, &stats);
   printf("Input opened: %u Hz, S16 mono, user %d\n", stats.sample_rate, user_id);
-  printf("Reading stream; stop the payload to close the port.\n");
-  for(;;) {
+  printf("Reading stream for %u seconds; toggle the DualSense MUTE button to observe silence.\n",
+         CAPTURE_SECONDS);
+  while(elapsed < CAPTURE_SECONDS) {
     rc = ps5_microphone_read(mic, samples, 256, 1000);
     if(rc < 0) {
       fprintf(stderr, "Microphone read failed: %x\n", rc);
@@ -66,15 +72,23 @@ main(void) {
       }
     }
     if(loops >= stats.sample_rate / 256) {
-      printf("frames=%llu peak=%d mean-square=%llu\n",
-             (unsigned long long)frames, peak,
-             (unsigned long long)(energy / window_frames));
+      ps5_microphone_get_stats(mic, &stats);
+      printf("second=%u frames=%llu peak=%d mean-square=%llu silent=0x%x dropped=%llu\n",
+             elapsed + 1, (unsigned long long)frames, peak,
+             (unsigned long long)(energy / window_frames), stats.silent_state,
+             (unsigned long long)stats.dropped_frames);
       loops = 0;
       energy = 0;
       window_frames = 0;
       peak = 0;
+      elapsed++;
     }
   }
+  ps5_microphone_get_stats(mic, &stats);
+  printf("Capture complete: captured=%llu delivered=%llu dropped=%llu\n",
+         (unsigned long long)stats.captured_frames,
+         (unsigned long long)stats.delivered_frames,
+         (unsigned long long)stats.dropped_frames);
   ps5_microphone_close(mic);
   sceUserServiceTerminate();
   return rc < 0 ? 1 : 0;

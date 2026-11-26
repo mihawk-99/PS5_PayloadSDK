@@ -1,5 +1,6 @@
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
+CAPTURE_SECONDS ?= 30
 
 ifdef PS5_PAYLOAD_SDK
     include $(PS5_PAYLOAD_SDK)/toolchain/prospero.mk
@@ -8,7 +9,7 @@ else
 endif
 
 ELF := microphone_stream.elf
-CFLAGS := -Wall -Werror -I$(PS5_PAYLOAD_SDK)/target/include
+CFLAGS := -Wall -Werror -I$(PS5_PAYLOAD_SDK)/target/include -DCAPTURE_SECONDS=$(CAPTURE_SECONDS)
 LDFLAGS := -L$(PS5_PAYLOAD_SDK)/target/lib -lps5platform -lSceAudioIn -lSceUserService
 
 all: $(ELF)
