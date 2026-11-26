@@ -26,7 +26,7 @@ include ../Makefile.inc
 # headers in place of an installed SDK's.
 CFLAGS := -target x86_64-sie-ps5 -fPIC -fno-plt -fno-stack-protector -femulated-tls
 CFLAGS += -fvisibility-nodllstorageclass=default
-CFLAGS += -isystem ../include/freebsd -Iinclude
+CFLAGS += -isystem ../include/freebsd -I../include -Iinclude
 CFLAGS += -std=c11 -O2 -Wall -Wextra -Werror
 
 SRCS := $(wildcard src/*.c)
@@ -47,7 +47,7 @@ HEAP_HEADERS := src/dlmalloc/malloc.c
 
 HOST_CC ?= cc
 HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -Iinclude -Isrc -pthread
-HOST_SRCS := $(filter-out src/probe.c,$(SRCS)) tests/host_kernel.c tests/host_libc.c tests/test_platform.c
+HOST_SRCS := $(filter-out src/probe.c src/microphone.c,$(SRCS)) tests/host_kernel.c tests/host_libc.c tests/test_platform.c
 HOST_REGEX_OBJS := $(REGEX_SRCS:src/regex/%.c=build/host/regex/%.o)
 HOST_HEAP_OBJ := build/host/dlmalloc/mspace.o
 

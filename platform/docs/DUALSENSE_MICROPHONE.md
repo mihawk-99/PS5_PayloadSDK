@@ -1,0 +1,67 @@
+# DualSense microphone capture
+
+Status: reusable capture API and example implemented on `feature/dualsense-mic-stream`. Runtime behavior still needs validation on a PS5.
+
+## What is known
+
+The PS5 input path is a system audio service. A title opens an AudioIn port for a user, then reads signed PCM blocks from that port. It is not necessary to read raw DualSense USB/Bluetooth reports: the system routes the user's selected microphone device. That means the capture may come from a headset or USB mic if that is the selected input, rather than the controller's built-in mic. Sony describes selecting the active input device and muting from the PS5 Mic control center in its [microphone settings guide](https://www.playstation.com/en-us/support/hardware/ps5-change-audio-output/).
+
+The most concrete implementation reference in the related homebrew workspace is [PS5_RetroArch's `microphone_ps5.cpp`](https://github.com/mihawk-99/PS5_RetroArch/blob/main/src/microphone_ps5.cpp). Its source comments report native capture and mute-state validation on firmware 13.60. It initializes AudioIn, opens the initial user's port, reads fixed-size PCM blocks on a dedicated thread, and feeds a bounded ring buffer for the frontend to consume. It first tries 48 kHz with 256 samples per block, then 16 kHz; it tries port types 0 and 1. The buffer format is signed 16-bit mono. A 256-sample block spans about 5.33 ms at 48 kHz or 16 ms at 16 kHz.
+
+The capture functions used by that implementation have these observed signatures:
+
+```c
+int sceAudioInInit(void);
+int sceAudioInOpen(int user_id, int type, int index,
+                   unsigned length, unsigned rate, unsigned format);
+int sceAudioInInput(int handle, void *samples);
+int sceAudioInGetSilentState(int handle);
+int sceAudioInClose(int handle);
+```
+
+Treat the signature as an observed homebrew ABI, not an official Sony header. Port types `0` and `1`, format `0`, 256-sample grains, and rates 48 kHz/16 kHz are the values used by the source and related probes; availability can vary with firmware and process context. The PS5 developer wiki identifies the internal AudioIn module as `libSceAudioIn`, module id `0x80000002` ([module list](https://www.psdevwiki.com/ps5/Libraries)). This fork's `crt/rtld_sprx.c` already knows that module id, but `sce_stubs/` currently has no `libSceAudioIn.c` and `include/ps5/` has no AudioIn header.
+
+The RetroArch implementation treats `(silent_state & 5) != 0` as a muted or absent input state, emits zero samples in that state, and clears queued audio when the state changes. Those bit meanings are based on its target testing and should remain documented as firmware observations until independently checked. The PS5 UI's mute control must be considered too; a capture API should not preserve older speech in its queue after mute or pause.
+
+## Real-time design for this SDK
+
+The public abstraction is in `platform/include/ps5platform/microphone.h`; the empirical ABI declarations and import stub are `include/ps5/audioin.h` and `sce_stubs/libSceAudioIn.c`:
+
+```text
+AudioIn port
+  -> dedicated capture thread (one 256-frame PCM block per read)
+  -> bounded S16 mono ring buffer
+  -> nonblocking or timed read by a homebrew worker
+  -> voice encoder, VAD, recording, or other consumer
+```
+
+Example:
+
+```c
+ps5_microphone_options_t options = {
+  .user_id = user_id,          /* obtained by the application via UserService */
+  .sample_rate = 0,            /* 48 kHz, then 16 kHz fallback */
+  .frames_per_read = 256,
+  .queue_frames = 4096,
+};
+ps5_microphone_t *mic;
+ps5_microphone_open(&mic, &options);
+int16_t pcm[256];              /* mono S16; one read = 256 frames */
+int frames = ps5_microphone_read(mic, pcm, 256, 100); /* timeout in ms */
+ps5_microphone_close(mic);
+```
+
+Build consumers with `-lps5platform -lSceAudioIn`. The fork's SDK setup script builds and installs this AudioIn import stub alongside the platform archive. `samples/microphone_stream/` is a small live stream example; it prints block-level signal statistics rather than writing captured voice to a file. The consumer API reports the negotiated rate, PCM frame reads, timeout/nonblocking behavior, and captured/delivered/dropped counters. The queue has a fixed maximum size; when full, dropping the oldest frames keeps a live stream current instead of adding unbounded latency. Applications should consume samples on a worker thread and must not call the blocking capture function from a render or controller-poll loop.
+
+The capture starts only after an explicit open request. Close stops delivery, clears pending samples, joins the capture worker, and closes the port. Errors from open/input/state queries are returned to the caller. No explicit module load/unload operation is currently used by the wrapper. The selected user id must be supplied by the caller, so the core platform library does not silently choose a user.
+
+The wrapper uses the source-observed `(silent_state & 5)` mute/absent-input interpretation: it clears stale queued frames when entering that state and delivers zero-filled blocks while muted. This is not an official ABI guarantee. `ps5_microphone_close()` waits for an in-flight blocking AudioIn read to return; test stop latency on target hardware before using it in a latency-sensitive shutdown path. Do not call `read`, `get_stats`, and `close` concurrently on the same handle unless externally synchronized.
+
+## Evidence and limits
+
+- **Runtime implementation reference:** [PS5_RetroArch capture driver](https://github.com/mihawk-99/PS5_RetroArch/blob/main/src/microphone_ps5.cpp); its source records firmware 13.60 validation.
+- **Independent API/capture probe source:** [Halo Android PS5 AudioIn probe](https://github.com/zay448345045/halo-android/blob/main/port/ps5/probe/audioin/main.c); documents user selection, port profiles, rates, block sizes, mute-state sampling, and module-load experiments.
+- **SDK evidence:** `crt/rtld_sprx.c` maps `libSceAudioIn.sprx` to `0x80000002`; no import stub or header existed before this feature branch.
+- **Official user behavior:** [Sony's PS5 mic settings](https://www.playstation.com/en-us/support/hardware/ps5-change-audio-output/); describes input-device selection and mute controls but does not publish the programming ABI.
+
+No console is attached to this development environment, so code changes here cannot by themselves establish hardware capture, route choice, mute behavior, or firmware compatibility. Those claims require a target run with the console model, firmware, selected input device, controller connection mode, and mute state recorded.
