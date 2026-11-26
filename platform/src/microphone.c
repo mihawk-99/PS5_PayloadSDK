@@ -2,6 +2,7 @@
 #include "ps5/audioin.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,10 +36,17 @@ struct ps5_microphone {
 };
 
 static void
+wipe_samples(int16_t *samples, size_t count) {
+  volatile int16_t *p = samples;
+  while(count--) *p++ = 0;
+}
+
+static void
 queue_clear(ps5_microphone_t *mic) {
   mic->dropped += mic->count;
   mic->head = 0;
   mic->count = 0;
+  wipe_samples(mic->queue, mic->capacity);
 }
 
 static void
@@ -103,14 +111,18 @@ capture_thread(void *arg) {
     pthread_cond_broadcast(&mic->available);
     pthread_mutex_unlock(&mic->mutex);
   }
+  wipe_samples(block, mic->grain);
   free(block);
   return NULL;
 }
 
 static int
 open_port(int user, unsigned grain, unsigned rate) {
-  int handle = sceAudioInOpen(user, 0, 0, grain, rate, 0);
-  if(handle < 0) handle = sceAudioInOpen(user, 1, 0, grain, rate, 0);
+  static const int types[] = {0, 1, 5};
+  size_t i;
+  int handle = -1;
+  for(i = 0; i < sizeof(types) / sizeof(types[0]) && handle < 0; i++)
+    handle = sceAudioInOpen(user, types[i], 0, grain, rate, 0);
   return handle;
 }
 
@@ -128,7 +140,8 @@ ps5_microphone_open(ps5_microphone_t **out,
   if(options->sample_rate && options->sample_rate != 48000 && options->sample_rate != 16000)
     return -EINVAL;
   rc = sceAudioInInit();
-  if(rc < 0) return rc;
+  if(rc < 0 && (uint32_t)rc != 0x8026000eu &&
+     (uint32_t)rc != 0x8026000cu) return rc;
   if(options->sample_rate) {
     handle = open_port(options->user_id, grain, options->sample_rate);
     rate = options->sample_rate;
@@ -190,6 +203,7 @@ ps5_microphone_read(ps5_microphone_t *mic, int16_t *samples,
   struct timespec deadline;
   if(!mic || (!samples && capacity_frames)) return -EINVAL;
   if(!capacity_frames) return 0;
+  if(capacity_frames > INT_MAX) capacity_frames = INT_MAX;
   if(timeout_ms != UINT32_MAX && timeout_ms) deadline_after(&deadline, timeout_ms);
   pthread_mutex_lock(&mic->mutex);
   while(!mic->count && !mic->finished && !mic->stopping) {

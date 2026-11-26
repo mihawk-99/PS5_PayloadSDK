@@ -31,7 +31,7 @@ CFLAGS += -std=c11 -O2 -Wall -Wextra -Werror
 
 SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:src/%.c=build/ps5/%.o)
-HEADERS := $(wildcard include/ps5platform/*.h src/*.h) ../include/freebsd/sys/_ucontext.h
+HEADERS := $(wildcard include/ps5platform/*.h src/*.h) ../include/ps5/audioin.h ../include/freebsd/sys/_ucontext.h
 
 # musl's regex engine (src/regex/, MIT), built as imported: its own warnings
 # are not this tree's to fix.
