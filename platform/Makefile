@@ -26,12 +26,12 @@ include ../Makefile.inc
 # headers in place of an installed SDK's.
 CFLAGS := -target x86_64-sie-ps5 -fPIC -fno-plt -fno-stack-protector -femulated-tls
 CFLAGS += -fvisibility-nodllstorageclass=default
-CFLAGS += -isystem ../include/freebsd -Iinclude
+CFLAGS += -isystem ../include/freebsd -I../include -Iinclude
 CFLAGS += -std=c11 -O2 -Wall -Wextra -Werror
 
 SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:src/%.c=build/ps5/%.o)
-HEADERS := $(wildcard include/ps5platform/*.h src/*.h) ../include/freebsd/sys/_ucontext.h
+HEADERS := $(wildcard include/ps5platform/*.h src/*.h) ../include/ps5/audioin.h ../include/freebsd/sys/_ucontext.h
 
 # musl's regex engine (src/regex/, MIT), built as imported: its own warnings
 # are not this tree's to fix.
@@ -47,7 +47,7 @@ HEAP_HEADERS := src/dlmalloc/malloc.c
 
 HOST_CC ?= cc
 HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -Iinclude -Isrc -pthread
-HOST_SRCS := $(filter-out src/probe.c,$(SRCS)) tests/host_kernel.c tests/host_libc.c tests/test_platform.c
+HOST_SRCS := $(filter-out src/probe.c src/microphone.c,$(SRCS)) tests/host_kernel.c tests/host_libc.c tests/test_platform.c
 HOST_REGEX_OBJS := $(REGEX_SRCS:src/regex/%.c=build/host/regex/%.o)
 HOST_HEAP_OBJ := build/host/dlmalloc/mspace.o
 

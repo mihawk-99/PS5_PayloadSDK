@@ -82,6 +82,9 @@ install -m 0755 "$tree/host/bin/prospero-clang" "$tree/host/bin/prospero-clang++
 make -s -C "$tree/include" install DESTDIR="$staging/ps5-payload-sdk"
 make -s -C "$tree/platform" clean
 make -s -C "$tree/platform" install DESTDIR="$staging/ps5-payload-sdk"
+# The upstream binary release predates this fork's AudioIn import stub.
+make -s -C "$tree/sce_stubs" libSceAudioIn.so
+install -m 0644 "$tree/sce_stubs/libSceAudioIn.so" "$staging/ps5-payload-sdk/target/lib/"
 printf '%s\n' "$revision" >"$staging/ps5-payload-sdk/.ps5-sdk-revision"
 
 # Into place by content: a file the new revision did not change keeps its

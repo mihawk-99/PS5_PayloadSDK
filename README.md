@@ -9,6 +9,8 @@ port and ps5vk), [PS5_RetroArch](https://github.com/mihawk-99/PS5_RetroArch),
 [PS5_vkQuake](https://github.com/mihawk-99/PS5_vkQuake) and their titles each
 pin one revision of this fork.
 
+For a repository map, subsystem analysis, sample catalog and notes on controller microphone support, see [BASE_CONHECIMENTO.md](BASE_CONHECIMENTO.md).
+
 Everything below [the upstream SDK](#the-upstream-sdk) is upstream's own
 documentation and applies unchanged.
 
@@ -28,12 +30,17 @@ states about the console, rests on runs on the console
 | `fp.h`, `context.h` | The floating-point state threads start with, and the machine context as the console lays it out (`uc_mcontext.mc_rip` is the faulting instruction). |
 | `klog.h` | A title's standard error in the kernel log. |
 | `agc.h`, `videoout.h` | The exported AGC and VideoOut functions the GPU drivers call. |
+| `microphone.h` | Real-time S16 mono capture from the system-selected microphone through AudioIn, with a bounded queue and capture statistics. |
 | `probe.h` | The console capability probe behind [PROBE.md](platform/docs/PROBE.md). |
 
 Rules the layer keeps: it calls exported functions only, and what it states
 about the console comes from its own probes, not from reading the system
 software. `make -C platform test` runs its host unit tests against a host model
 of the console's kernel.
+
+Microphone capture research, ABI caveats, integration notes, and the live sample
+are documented in [DUALSENSE_MICROPHONE.md](platform/docs/DUALSENSE_MICROPHONE.md)
+and `samples/microphone_stream/`.
 
 ## How projects consume it
 
