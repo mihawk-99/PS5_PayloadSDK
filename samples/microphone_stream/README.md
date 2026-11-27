@@ -13,8 +13,11 @@ export PS5_HOST=ps5
 make -C samples/microphone_stream test
 ```
 
-Set `PS5_HOST` and `PS5_PORT` for the target console and its payload deploy
-service. For a different capture duration, pass for example
+Before deploying, make sure the PS5 homebrew environment is active and an ELF
+loader is already listening on the target port. `prospero-deploy` sends the ELF;
+it does not start the loader. The standard `ps5-payload-elfldr` listener uses
+TCP port 9021. Set `PS5_HOST` and `PS5_PORT` for your console and loader. For a
+different capture duration, pass for example
 `make -C samples/microphone_stream CAPTURE_SECONDS=10`.
 
 The printed silence bitmask is firmware-dependent diagnostic information, not
