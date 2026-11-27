@@ -32,6 +32,12 @@ only accepts ELF payloads and does not install or launch a title. The sample's
 `test` target is therefore a payload-context smoke test, not a microphone
 hardware acceptance test.
 
+A separate title-context probe using this SDK API was reported working on a
+PS5 on 2026-11-27. Its model, firmware, selected input device, and numeric
+capture measurements were not recorded; see
+[`platform/docs/DUALSENSE_MICROPHONE.md`](../../platform/docs/DUALSENSE_MICROPHONE.md)
+for the validation scope.
+
 The printed silence bitmask is firmware-dependent diagnostic information, not
 a public Sony API contract. Record the PS5 model, system firmware, selected
 input device, controller connection mode, and mute transitions when reporting

@@ -1,10 +1,12 @@
 # DualSense microphone capture
 
-Status: reusable capture API and example implemented on `feature/dualsense-mic-stream`. Runtime behavior still needs validation on a PS5.
+Status: reusable capture API and example implemented on `feature/dualsense-mic-stream`. A PS5 title-context test has confirmed live capture once; firmware/model details and numerical measurements were not recorded.
 
 ## What is known
 
 The PS5 input path is a system audio service. A title opens an AudioIn port for a user, then reads signed PCM blocks from that port. It is not necessary to read raw DualSense USB/Bluetooth reports: the system routes the user's selected microphone device. That means the capture may come from a headset or USB mic if that is the selected input, rather than the controller's built-in mic. Sony describes selecting the active input device and muting from the PS5 Mic control center in its [microphone settings guide](https://www.playstation.com/en-us/support/hardware/ps5-change-audio-output/).
+
+**Hardware validation (2026-11-27):** a homebrew title using this SDK API opened AudioIn at 48 kHz and was reported working by the PS5 owner. A raw ELF sent through `ps5-payload-elfldr` did not provide application identity and failed at `sceAudioInOpen` with `0x809b0081`; that result does not apply to a title launch. The title-context screen originally appeared static because its renderer drew only at startup; after making it refresh continuously, the owner confirmed that capture worked. The console model, firmware, selected input device, controller connection mode, and exact live meter values were not captured, so this is one positive hardware report rather than a compatibility claim.
 
 The most concrete implementation reference in the related homebrew workspace is [PS5_RetroArch's `microphone_ps5.cpp`](https://github.com/mihawk-99/PS5_RetroArch/blob/main/src/microphone_ps5.cpp). Its source comments report native capture and mute-state validation on firmware 13.60. It initializes AudioIn, opens the initial user's port, reads fixed-size PCM blocks on a dedicated thread, and feeds a bounded ring buffer for the frontend to consume. It first tries 48 kHz with 256 samples per block, then 16 kHz; it tries port types 0 and 1. A separate [firmware 6.02 report](https://github.com/blackbearreloaded/ps5-audio-decoding-research/blob/main/examples/native-audio-poc/README.md) says type 5 also produced valid PCM in two runs, so the wrapper tries types 0, 1, and 5 in that order. The buffer format is signed 16-bit mono. A 256-sample block spans about 5.33 ms at 48 kHz or 16 ms at 16 kHz.
 
